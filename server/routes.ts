@@ -1,16 +1,42 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProductSchema, insertOrderSchema } from "@shared/schema";
+import { insertProductSchema, insertOrderSchema, adminLoginSchema } from "@shared/schema";
 import { z } from "zod";
 import Stripe from "stripe";
+import crypto from "crypto";
 
 // Initialize Stripe - will handle missing key in payment endpoints
 let stripe: Stripe | null = null;
 if (process.env.STRIPE_SECRET_KEY) {
-  stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-    apiVersion: "2023-10-16",
-  });
+  stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+}
+
+// Admin middleware
+async function requireAdminAuth(req: Request, res: Response, next: NextFunction) {
+  try {
+    const sessionId = req.cookies?.adminSession;
+    if (!sessionId) {
+      return res.status(401).json({ error: "Admin authentication required" });
+    }
+
+    const session = await storage.getAdminSession(sessionId);
+    if (!session || session.expiresAt < new Date()) {
+      // Clean up expired session
+      if (session) {
+        await storage.deleteAdminSession(sessionId);
+      }
+      res.clearCookie("adminSession");
+      return res.status(401).json({ error: "Session expired" });
+    }
+
+    // Add session to request for use in route handlers
+    (req as any).adminSession = session;
+    next();
+  } catch (error) {
+    console.error("Admin auth middleware error:", error);
+    res.status(500).json({ error: "Authentication error" });
+  }
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -19,6 +45,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const { filename } = req.params;
     const imagePath = `./attached_assets/generated_images/${filename}`;
     res.sendFile(imagePath, { root: process.cwd() });
+  });
+
+  // Admin Authentication Routes
+  app.post("/api/admin/login", async (req, res) => {
+    try {
+      const { password } = adminLoginSchema.parse(req.body);
+      
+      // Check admin password from environment
+      if (!process.env.ADMIN_PASSWORD) {
+        return res.status(500).json({ error: "Admin authentication not configured" });
+      }
+      
+      if (password !== process.env.ADMIN_PASSWORD) {
+        return res.status(401).json({ error: "Invalid password" });
+      }
+      
+      // Create admin session
+      const sessionId = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + 24); // 24 hour session
+      
+      await storage.createAdminSession({
+        sessionId,
+        expiresAt
+      });
+      
+      // Set httpOnly cookie
+      res.cookie("adminSession", sessionId, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      });
+      
+      res.json({ success: true, message: "Admin authenticated successfully" });
+    } catch (error) {
+      console.error("Admin login error:", error);
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: "Invalid login data", details: error.errors });
+      } else {
+        res.status(500).json({ error: "Login failed" });
+      }
+    }
+  });
+
+  app.post("/api/admin/logout", requireAdminAuth, async (req, res) => {
+    try {
+      const sessionId = req.cookies?.adminSession;
+      if (sessionId) {
+        await storage.deleteAdminSession(sessionId);
+      }
+      res.clearCookie("adminSession");
+      res.json({ success: true, message: "Logged out successfully" });
+    } catch (error) {
+      console.error("Admin logout error:", error);
+      res.status(500).json({ error: "Logout failed" });
+    }
+  });
+
+  app.get("/api/admin/me", requireAdminAuth, async (req, res) => {
+    try {
+      const session = (req as any).adminSession;
+      res.json({ 
+        authenticated: true, 
+        sessionId: session.id,
+        expiresAt: session.expiresAt 
+      });
+    } catch (error) {
+      console.error("Admin me error:", error);
+      res.status(500).json({ error: "Failed to get admin info" });
+    }
   });
 
   // Product routes
@@ -57,7 +154,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/products", async (req, res) => {
+  app.post("/api/products", requireAdminAuth, async (req, res) => {
     try {
       // Convert prices from KSh to cents for storage
       const productData = {
@@ -87,7 +184,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/products/:id", async (req, res) => {
+  app.put("/api/products/:id", requireAdminAuth, async (req, res) => {
     try {
       // Convert prices from KSh to cents for storage
       const updateData = {
@@ -115,7 +212,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/products/:id", async (req, res) => {
+  app.delete("/api/products/:id", requireAdminAuth, async (req, res) => {
     try {
       const deleted = await storage.deleteProduct(req.params.id);
       if (!deleted) {
@@ -125,6 +222,85 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error deleting product:", error);
       res.status(500).json({ error: "Failed to delete product" });
+    }
+  });
+
+  // Admin API Routes
+  app.get("/api/admin/orders", requireAdminAuth, async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 50;
+      const offset = parseInt(req.query.offset as string) || 0;
+      const status = req.query.status as string;
+      
+      let result;
+      if (status) {
+        result = await storage.getOrdersByStatus(status, limit, offset);
+      } else {
+        result = await storage.getAllOrders(limit, offset);
+      }
+      
+      // Convert prices from cents to KSh for frontend
+      const ordersWithPrices = result.orders.map(order => ({
+        ...order,
+        deliveryCharge: order.deliveryCharge / 100,
+        subtotal: order.subtotal / 100,
+        total: order.total / 100,
+      }));
+      
+      res.json({
+        orders: ordersWithPrices,
+        total: result.total,
+        limit,
+        offset
+      });
+    } catch (error) {
+      console.error("Error fetching admin orders:", error);
+      res.status(500).json({ error: "Failed to fetch orders" });
+    }
+  });
+
+  app.patch("/api/admin/orders/:id/status", requireAdminAuth, async (req, res) => {
+    try {
+      const { status } = req.body;
+      
+      if (!status || !['pending', 'processing', 'shipped', 'delivered'].includes(status)) {
+        return res.status(400).json({ error: "Invalid status. Must be: pending, processing, shipped, or delivered" });
+      }
+      
+      const updatedOrder = await storage.updateOrderStatus(req.params.id, status);
+      if (!updatedOrder) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      
+      // Convert prices from cents to KSh for frontend
+      const orderWithPrice = {
+        ...updatedOrder,
+        deliveryCharge: updatedOrder.deliveryCharge / 100,
+        subtotal: updatedOrder.subtotal / 100,
+        total: updatedOrder.total / 100,
+      };
+      
+      res.json(orderWithPrice);
+    } catch (error) {
+      console.error("Error updating order status:", error);
+      res.status(500).json({ error: "Failed to update order status" });
+    }
+  });
+
+  app.get("/api/admin/stats", requireAdminAuth, async (req, res) => {
+    try {
+      const stats = await storage.getAdminStats();
+      
+      // Convert revenue from cents to KSh for frontend
+      const statsWithPrice = {
+        ...stats,
+        totalRevenue: stats.totalRevenue / 100
+      };
+      
+      res.json(statsWithPrice);
+    } catch (error) {
+      console.error("Error fetching admin stats:", error);
+      res.status(500).json({ error: "Failed to fetch stats" });
     }
   });
 

@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -12,10 +12,21 @@ import CartPage from "@/pages/CartPage";
 import CheckoutPage from "@/pages/CheckoutPage";
 import ContactPage from "@/pages/ContactPage";
 import NotFound from "@/pages/NotFound";
+import AdminLoginPage from "@/pages/admin/LoginPage";
+import AdminDashboardPage from "@/pages/admin/DashboardPage";
+import AdminProductsPage from "@/pages/admin/ProductsPage";
+import AdminOrdersPage from "@/pages/admin/OrdersPage";
 
 function Router() {
   return (
     <Switch>
+      {/* Admin Routes */}
+      <Route path="/admin/login" component={AdminLoginPage} />
+      <Route path="/admin/dashboard" component={AdminDashboardPage} />
+      <Route path="/admin/products" component={AdminProductsPage} />
+      <Route path="/admin/orders" component={AdminOrdersPage} />
+      
+      {/* Public Routes */}
       <Route path="/" component={HomePage} />
       <Route path="/shop" component={ShopPage} />
       <Route path="/cart" component={CartPage} />
@@ -31,17 +42,36 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <CartProvider>
-          <div className="min-h-screen bg-background text-foreground">
-            <Header />
-            <main className="flex-1">
-              <Router />
-            </main>
-            <Footer />
-          </div>
+          <AppLayout />
           <Toaster />
         </CartProvider>
       </TooltipProvider>
     </QueryClientProvider>
+  );
+}
+
+function AppLayout() {
+  const [location] = useLocation();
+  const isAdminRoute = location.startsWith('/admin');
+  
+  if (isAdminRoute) {
+    // Admin routes don't need Header/Footer - they have their own layouts
+    return (
+      <div className="min-h-screen bg-background text-foreground">
+        <Router />
+      </div>
+    );
+  }
+  
+  // Regular routes get Header/Footer
+  return (
+    <div className="min-h-screen bg-background text-foreground">
+      <Header />
+      <main className="flex-1">
+        <Router />
+      </main>
+      <Footer />
+    </div>
   );
 }
 

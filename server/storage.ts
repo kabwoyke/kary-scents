@@ -5,12 +5,15 @@ import {
   type InsertOrder,
   type OrderItem,
   type InsertOrderItem,
+  type AdminSession,
+  type InsertAdminSession,
   products,
   orders,
-  orderItems
+  orderItems,
+  adminSessions
 } from "@shared/schema";
 import { db } from "./db";
-import { eq } from "drizzle-orm";
+import { eq, desc, count, sum, gte } from "drizzle-orm";
 
 export interface IStorage {
   // Products
@@ -26,6 +29,24 @@ export interface IStorage {
   getOrderWithItems(id: string): Promise<{ order: Order; items: OrderItem[] } | undefined>;
   updateOrderStatus(id: string, status: string): Promise<Order | undefined>;
   updateOrderPaymentIntent(id: string, paymentIntentId: string): Promise<Order | undefined>;
+  
+  // Admin Orders Management
+  getAllOrders(limit?: number, offset?: number): Promise<{ orders: Order[]; total: number }>;
+  getOrdersByStatus(status: string, limit?: number, offset?: number): Promise<{ orders: Order[]; total: number }>;
+  
+  // Admin Sessions
+  createAdminSession(session: InsertAdminSession): Promise<AdminSession>;
+  getAdminSession(sessionId: string): Promise<AdminSession | undefined>;
+  deleteAdminSession(sessionId: string): Promise<boolean>;
+  deleteExpiredAdminSessions(): Promise<number>;
+  
+  // Admin Stats
+  getAdminStats(): Promise<{
+    totalProducts: number;
+    totalOrders: number;
+    totalRevenue: number;
+    recentOrdersCount: number;
+  }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -105,6 +126,85 @@ export class DatabaseStorage implements IStorage {
       .where(eq(orders.id, id))
       .returning();
     return result[0];
+  }
+
+  // Admin Orders Management
+  async getAllOrders(limit: number = 50, offset: number = 0): Promise<{ orders: Order[]; total: number }> {
+    const [ordersResult, totalResult] = await Promise.all([
+      db.select().from(orders).orderBy(desc(orders.createdAt)).limit(limit).offset(offset),
+      db.select({ count: count() }).from(orders)
+    ]);
+    
+    return {
+      orders: ordersResult,
+      total: totalResult[0].count
+    };
+  }
+
+  async getOrdersByStatus(status: string, limit: number = 50, offset: number = 0): Promise<{ orders: Order[]; total: number }> {
+    const [ordersResult, totalResult] = await Promise.all([
+      db.select().from(orders).where(eq(orders.status, status)).orderBy(desc(orders.createdAt)).limit(limit).offset(offset),
+      db.select({ count: count() }).from(orders).where(eq(orders.status, status))
+    ]);
+    
+    return {
+      orders: ordersResult,
+      total: totalResult[0].count
+    };
+  }
+
+  // Admin Sessions
+  async createAdminSession(session: InsertAdminSession): Promise<AdminSession> {
+    const result = await db.insert(adminSessions).values(session).returning();
+    return result[0];
+  }
+
+  async getAdminSession(sessionId: string): Promise<AdminSession | undefined> {
+    const result = await db
+      .select()
+      .from(adminSessions)
+      .where(eq(adminSessions.sessionId, sessionId));
+    return result[0];
+  }
+
+  async deleteAdminSession(sessionId: string): Promise<boolean> {
+    const result = await db
+      .delete(adminSessions)
+      .where(eq(adminSessions.sessionId, sessionId));
+    return (result as any).rowCount > 0;
+  }
+
+  async deleteExpiredAdminSessions(): Promise<number> {
+    const now = new Date();
+    const result = await db
+      .delete(adminSessions)
+      .where(lt(adminSessions.expiresAt, now));
+    return (result as any).rowCount || 0;
+  }
+
+  // Admin Stats
+  async getAdminStats(): Promise<{
+    totalProducts: number;
+    totalOrders: number;
+    totalRevenue: number;
+    recentOrdersCount: number;
+  }> {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const [productsCount, ordersCount, revenueSum, recentOrdersCount] = await Promise.all([
+      db.select({ count: count() }).from(products),
+      db.select({ count: count() }).from(orders),
+      db.select({ total: sum(orders.total) }).from(orders),
+      db.select({ count: count() }).from(orders).where(gte(orders.createdAt, sevenDaysAgo))
+    ]);
+
+    return {
+      totalProducts: productsCount[0].count,
+      totalOrders: ordersCount[0].count,
+      totalRevenue: Number(revenueSum[0].total) || 0,
+      recentOrdersCount: recentOrdersCount[0].count
+    };
   }
 }
 
