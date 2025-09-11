@@ -1,76 +1,48 @@
 import ProductGrid from "@/components/ProductGrid";
 import { type Product } from "@/components/ProductCard";
-import perfume1 from "@assets/generated_images/Arabic_luxury_perfume_bottle_c29bda24.png";
-import perfume2 from "@assets/generated_images/Premium_Arabic_perfume_bottle_17638015.png";
-import collectionUrl from "@assets/generated_images/Arabic_perfume_collection_display_7e73a28e.png";
+import { Loader2 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { useCart } from "@/context/CartContext";
 
 export default function ShopPage() {
-  // todo: remove mock functionality - replace with API call
-  const allProducts: Product[] = [
-    {
-      id: "1",
-      name: "Oud Al Maktoub",
-      price: 4500,
-      originalPrice: 5500,
-      image: perfume1,
-      category: "Arabic Fragrances",
-      description: "A luxurious blend of traditional oud and modern elegance, perfect for special occasions",
-      isNew: true,
-    },
-    {
-      id: "2", 
-      name: "Rose Damascena",
-      price: 3200,
-      image: perfume2,
-      category: "Floral Scents",
-      description: "Delicate Damascus rose with subtle woody undertones for everyday elegance",
-    },
-    {
-      id: "3",
-      name: "Amber Nights",
-      price: 3800,
-      image: collectionUrl,
-      category: "Oriental",
-      description: "Warm amber and exotic spices for evening occasions and special moments",
-      isFavorite: true,
-    },
-    {
-      id: "4",
-      name: "Jasmine Royal",
-      price: 2900,
-      image: perfume1,
-      category: "Floral Scents", 
-      description: "Pure jasmine essence with hints of sandalwood for a royal experience",
-    },
-    {
-      id: "5",
-      name: "Musk Al Tahara",
-      price: 2200,
-      originalPrice: 2800,
-      image: perfume2,
-      category: "Arabic Fragrances",
-      description: "Traditional white musk, pure and clean for daily wear",
-    },
-    {
-      id: "6",
-      name: "Saffron Gold",
-      price: 5200,
-      image: collectionUrl,
-      category: "Premium Collection",
-      description: "Exclusive saffron-infused fragrance with gold accents",
-      isNew: true,
-    },
-  ];
+  const { addItem } = useCart();
+
+  // Fetch products from API
+  const { data: products = [], isLoading, error } = useQuery<Product[]>({
+    queryKey: ["/api/products"],
+  });
 
   const handleAddToCart = (product: Product) => {
-    // todo: remove mock functionality - integrate with cart context
+    addItem(product);
     console.log('Added to cart:', product.name);
   };
 
   const handleToggleFavorite = (productId: string) => {
-    // todo: remove mock functionality - integrate with favorites system
+    // Future implementation for favorites
     console.log('Toggled favorite for product:', productId);
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="flex items-center space-x-2">
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <span className="text-lg">Loading products...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-xl font-semibold mb-2">Unable to load products</h2>
+          <p className="text-muted-foreground">Please try refreshing the page</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen py-8">
@@ -87,7 +59,7 @@ export default function ShopPage() {
       </div>
       
       <ProductGrid 
-        products={allProducts}
+        products={products}
         title=""
         onAddToCart={handleAddToCart}
         onToggleFavorite={handleToggleFavorite}

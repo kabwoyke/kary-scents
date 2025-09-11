@@ -1,51 +1,57 @@
 import HeroSection from "@/components/HeroSection";
 import ProductGrid from "@/components/ProductGrid";
 import { type Product } from "@/components/ProductCard";
-import perfume1 from "@assets/generated_images/Arabic_luxury_perfume_bottle_c29bda24.png";
-import perfume2 from "@assets/generated_images/Premium_Arabic_perfume_bottle_17638015.png";
-import collectionUrl from "@assets/generated_images/Arabic_perfume_collection_display_7e73a28e.png";
+import { Loader2 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { useCart } from "@/context/CartContext";
 
 export default function HomePage() {
-  // todo: remove mock functionality - replace with API call
-  const featuredProducts: Product[] = [
-    {
-      id: "1",
-      name: "Oud Al Maktoub",
-      price: 4500,
-      originalPrice: 5500,
-      image: perfume1,
-      category: "Arabic Fragrances",
-      description: "A luxurious blend of traditional oud and modern elegance, perfect for special occasions",
-      isNew: true,
-    },
-    {
-      id: "2", 
-      name: "Rose Damascena",
-      price: 3200,
-      image: perfume2,
-      category: "Floral Scents",
-      description: "Delicate Damascus rose with subtle woody undertones for everyday elegance",
-    },
-    {
-      id: "3",
-      name: "Amber Nights",
-      price: 3800,
-      image: collectionUrl,
-      category: "Oriental",
-      description: "Warm amber and exotic spices for evening occasions and special moments",
-      isFavorite: true,
-    },
-  ];
+  const { addItem } = useCart();
+
+  // Fetch products from API and show only the first 3 as featured
+  const { data: allProducts = [], isLoading, error } = useQuery<Product[]>({
+    queryKey: ["/api/products"],
+  });
+
+  const featuredProducts = allProducts.slice(0, 3); // Show first 3 products as featured
 
   const handleAddToCart = (product: Product) => {
-    // todo: remove mock functionality - integrate with cart context
+    addItem(product);
     console.log('Added to cart:', product.name);
   };
 
   const handleToggleFavorite = (productId: string) => {
-    // todo: remove mock functionality - integrate with favorites system
+    // Future implementation for favorites
     console.log('Toggled favorite for product:', productId);
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen">
+        <HeroSection />
+        <div className="py-16 flex items-center justify-center">
+          <div className="flex items-center space-x-2">
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            <span className="text-lg">Loading featured products...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen">
+        <HeroSection />
+        <div className="py-16 flex items-center justify-center">
+          <div className="text-center">
+            <h2 className="text-xl font-semibold mb-2">Unable to load featured products</h2>
+            <p className="text-muted-foreground">Please try refreshing the page</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen">

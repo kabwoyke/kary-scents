@@ -2,14 +2,12 @@ import { ShoppingCart, Menu, X } from "lucide-react";
 import { useState } from "react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
+import { useCart } from "@/context/CartContext";
 import ThemeToggle from "./ThemeToggle";
 
-interface HeaderProps {
-  cartItemsCount?: number;
-}
-
-export default function Header({ cartItemsCount = 0 }: HeaderProps) {
+export default function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const { state } = useCart();
 
   const toggleMenu = () => {
     setIsMenuOpen(!isMenuOpen);
@@ -58,9 +56,9 @@ export default function Header({ cartItemsCount = 0 }: HeaderProps) {
             <Link href="/cart" data-testid="link-cart">
               <Button variant="ghost" size="icon" className="relative hover-elevate">
                 <ShoppingCart className="h-5 w-5" />
-                {cartItemsCount > 0 && (
+                {state.itemCount > 0 && (
                   <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-xs rounded-full h-5 w-5 flex items-center justify-center">
-                    {cartItemsCount}
+                    {state.itemCount}
                   </span>
                 )}
               </Button>
