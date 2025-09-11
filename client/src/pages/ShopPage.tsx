@@ -52,7 +52,7 @@ export default function ShopPage() {
             Our Complete Collection
           </h1>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Discover our full range of premium Arabic fragrances and luxury scents, 
+            Discover our full range of premium fragrances and luxury scents, 
             crafted for discerning customers who appreciate authentic quality.
           </p>
         </div>

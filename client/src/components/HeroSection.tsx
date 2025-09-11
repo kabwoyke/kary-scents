@@ -17,15 +17,11 @@ export default function HeroSection() {
       {/* Content */}
       <div className="relative z-10 text-center px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
         <h1 className="text-4xl md:text-6xl font-serif font-bold text-white mb-4">
-          KARY PERFUMES
+          KARY SCENTS
         </h1>
         
-        <p className="text-lg md:text-xl font-arabic text-white/90 mb-2">
-          عطور عربية أصيلة
-        </p>
-        
         <p className="text-lg md:text-xl text-white/90 mb-8 max-w-2xl mx-auto">
-          Discover the finest collection of authentic Arabic fragrances and luxury scents
+          Discover the finest collection of authentic fragrances and luxury scents
         </p>
         
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -58,7 +54,7 @@ export default function HeroSection() {
           </div>
           <div className="text-center">
             <div className="font-semibold">Authentic Scents</div>
-            <div className="text-sm">Premium Arabic Fragrances</div>
+            <div className="text-sm">Premium Fragrances</div>
           </div>
           <div className="text-center">
             <div className="font-semibold">Easy Shopping</div>

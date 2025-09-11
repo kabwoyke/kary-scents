@@ -23,11 +23,8 @@ export default function ContactPage() {
             Contact Us
           </h1>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Get in touch with KARY PERFUMES for inquiries about our premium Arabic fragrances
+            Get in touch with KARY SCENTS for inquiries about our premium fragrances
           </p>
-          <div className="text-base font-arabic text-muted-foreground mt-2">
-            تواصل معنا لأفضل العطور العربية
-          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -41,12 +38,9 @@ export default function ContactPage() {
             </CardHeader>
             <CardContent className="space-y-6">
               <div>
-                <h3 className="font-semibold text-foreground mb-2">KARY PERFUMES</h3>
+                <h3 className="font-semibold text-foreground mb-2">KARY SCENTS</h3>
                 <p className="text-muted-foreground">
-                  Premium Arabic Fragrances & Luxury Scents
-                </p>
-                <p className="font-arabic text-muted-foreground text-sm">
-                  عطور عربية أصيلة وعطور فاخرة
+                  Premium Fragrances & Luxury Scents
                 </p>
               </div>
 
@@ -78,7 +72,7 @@ export default function ContactPage() {
 
               <div className="pt-4">
                 <p className="text-sm text-muted-foreground mb-4">
-                  We specialize in authentic Arabic fragrances and luxury scents. 
+                  We specialize in authentic fragrances and luxury scents. 
                   Contact us for product inquiries, custom orders, or any questions 
                   about our collection.
                 </p>
@@ -142,11 +136,8 @@ export default function ContactPage() {
               </Card>
 
               <div className="text-center pt-4">
-                <p className="text-sm font-arabic text-muted-foreground">
-                  مرحباً بكم في كاري بيرفيومز
-                </p>
                 <p className="text-xs text-muted-foreground">
-                  Welcome to KARY PERFUMES
+                  Welcome to KARY SCENTS
                 </p>
               </div>
             </CardContent>

@@ -9,18 +9,12 @@ export default function Footer() {
           <div className="space-y-4">
             <div className="flex items-center space-x-2">
               <div className="text-2xl font-serif font-bold text-primary">
-                KARY
-              </div>
-              <div className="text-sm font-arabic text-muted-foreground">
-                عطور
+                KARY SCENTS
               </div>
             </div>
             <p className="text-muted-foreground">
-              Premium Arabic fragrances and luxury scents. Authentic quality, delivered across Kenya.
+              Premium fragrances and luxury scents. Authentic quality, delivered across Kenya.
             </p>
-            <div className="text-sm font-arabic text-muted-foreground">
-              عطور عربية أصيلة في كينيا
-            </div>
           </div>
 
           {/* Contact Info */}
@@ -65,7 +59,7 @@ export default function Footer() {
         </div>
 
         <div className="mt-8 pt-8 border-t border-border text-center text-sm text-muted-foreground">
-          <p>&copy; 2024 KARY PERFUMES. Premium Arabic Fragrances in Kenya.</p>
+          <p>&copy; 2025 KARY SCENTS. Premium Fragrances in Kenya.</p>
         </div>
       </div>
     </footer>

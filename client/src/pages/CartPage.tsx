@@ -34,7 +34,7 @@ export default function CartPage() {
             <ShoppingBag className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
             <h1 className="text-2xl font-bold mb-2">Your cart is empty</h1>
             <p className="text-muted-foreground mb-6">
-              Discover our exquisite collection of Arabic fragrances
+              Discover our exquisite collection of fragrances
             </p>
             <Link href="/shop">
               <Button size="lg" data-testid="button-shop-now">

@@ -22,10 +22,7 @@ export default function Header() {
           <Link href="/">
             <div className="flex items-center space-x-2" data-testid="link-home">
               <div className="text-2xl font-serif font-bold text-primary">
-                KARY
-              </div>
-              <div className="text-sm font-arabic text-muted-foreground">
-                عطور
+                KARY SCENTS
               </div>
             </div>
           </Link>
