@@ -5,15 +5,20 @@ import {
   type InsertOrder,
   type OrderItem,
   type InsertOrderItem,
+  type Review,
+  type InsertReview,
+  type UpdateReviewStatus,
+  type UpdateOrderMpesa,
   type AdminSession,
   type InsertAdminSession,
   products,
   orders,
   orderItems,
+  reviews,
   adminSessions
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, count, sum, gte, lt } from "drizzle-orm";
+import { eq, desc, count, sum, gte, lt, avg, and } from "drizzle-orm";
 
 export interface IStorage {
   // Products
@@ -47,6 +52,18 @@ export interface IStorage {
     totalRevenue: number;
     recentOrdersCount: number;
   }>;
+  
+  // Reviews
+  createReview(review: InsertReview): Promise<Review>;
+  getProductReviews(productId: string, status?: string): Promise<Review[]>;
+  getReviewById(id: string): Promise<Review | undefined>;
+  updateReviewStatus(id: string, status: UpdateReviewStatus): Promise<Review | undefined>;
+  getAllPendingReviews(limit?: number, offset?: number): Promise<{ reviews: Review[]; total: number }>;
+  getProductAverageRating(productId: string): Promise<number>;
+  
+  // Mpesa Orders
+  updateOrderMpesaDetails(id: string, updates: UpdateOrderMpesa): Promise<Order | undefined>;
+  getOrderByCheckoutRequestId(checkoutRequestId: string): Promise<Order | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -206,6 +223,86 @@ export class DatabaseStorage implements IStorage {
       recentOrdersCount: recentOrdersCount[0].count
     };
   }
+
+  // Reviews
+  async createReview(review: InsertReview): Promise<Review> {
+    const result = await db.insert(reviews).values(review).returning();
+    return result[0];
+  }
+
+  async getProductReviews(productId: string, status?: string): Promise<Review[]> {
+    let query = db.select().from(reviews).where(eq(reviews.productId, productId));
+    
+    if (status) {
+      query = query.where(and(
+        eq(reviews.productId, productId),
+        eq(reviews.status, status)
+      ));
+    }
+    
+    return await query.orderBy(desc(reviews.createdAt));
+  }
+
+  async getReviewById(id: string): Promise<Review | undefined> {
+    const result = await db.select().from(reviews).where(eq(reviews.id, id));
+    return result[0];
+  }
+
+  async updateReviewStatus(id: string, status: UpdateReviewStatus): Promise<Review | undefined> {
+    const result = await db
+      .update(reviews)
+      .set(status)
+      .where(eq(reviews.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async getAllPendingReviews(limit: number = 50, offset: number = 0): Promise<{ reviews: Review[]; total: number }> {
+    const [reviewsResult, totalResult] = await Promise.all([
+      db.select().from(reviews)
+        .where(eq(reviews.status, "pending"))
+        .orderBy(desc(reviews.createdAt))
+        .limit(limit)
+        .offset(offset),
+      db.select({ count: count() }).from(reviews).where(eq(reviews.status, "pending"))
+    ]);
+    
+    return {
+      reviews: reviewsResult,
+      total: totalResult[0].count
+    };
+  }
+
+  async getProductAverageRating(productId: string): Promise<number> {
+    const result = await db
+      .select({ avgRating: avg(reviews.rating) })
+      .from(reviews)
+      .where(and(
+        eq(reviews.productId, productId),
+        eq(reviews.status, "approved")
+      ));
+    
+    return Number(result[0].avgRating) || 0;
+  }
+
+  // Mpesa Orders
+  async updateOrderMpesaDetails(id: string, updates: UpdateOrderMpesa): Promise<Order | undefined> {
+    const result = await db
+      .update(orders)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(orders.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async getOrderByCheckoutRequestId(checkoutRequestId: string): Promise<Order | undefined> {
+    const result = await db
+      .select()
+      .from(orders)
+      .where(eq(orders.mpesaCheckoutRequestId, checkoutRequestId));
+    return result[0];
+  }
 }
 
 export const storage = new DatabaseStorage();
+
