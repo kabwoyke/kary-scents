@@ -7,10 +7,12 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Separator } from "@/components/ui/separator";
 import { useCart } from "@/context/CartContext";
 import { useLocation } from "wouter";
-import { Loader2, ArrowLeft, Smartphone } from "lucide-react";
+import { Loader2, ArrowLeft, Smartphone, CreditCard } from "lucide-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
+import { loadStripe } from "@stripe/stripe-js";
 
 interface CheckoutFormData {
   firstName: string;
@@ -33,6 +35,80 @@ interface PaymentStatus {
   total: number;
 }
 
+// Stripe Payment Form Component
+function StripePaymentForm({ 
+  clientSecret, 
+  onSuccess, 
+  onError, 
+  orderTotal 
+}: { 
+  clientSecret: string; 
+  onSuccess: () => void; 
+  onError: (error: string) => void;
+  orderTotal: number;
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!stripe || !elements) {
+      return;
+    }
+
+    setIsProcessing(true);
+
+    const { error } = await stripe.confirmPayment({
+      elements,
+      confirmParams: {
+        return_url: `${window.location.origin}/checkout`,
+      },
+      redirect: 'if_required'
+    });
+
+    setIsProcessing(false);
+
+    if (error) {
+      onError(error.message || "Payment failed");
+    } else {
+      onSuccess();
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6">
+      <div className="bg-muted/30 p-4 rounded-lg">
+        <div className="flex items-center gap-2 mb-4">
+          <CreditCard className="h-5 w-5 text-primary" />
+          <h3 className="text-lg font-semibold">Complete Your Payment</h3>
+        </div>
+        <p className="text-sm text-muted-foreground mb-4">
+          Total: <span className="font-semibold text-foreground">KSh {orderTotal.toLocaleString()}</span>
+        </p>
+        <PaymentElement />
+      </div>
+      
+      <Button 
+        type="submit" 
+        className="w-full" 
+        size="lg"
+        disabled={!stripe || isProcessing}
+      >
+        {isProcessing ? (
+          <>
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            Processing Payment...
+          </>
+        ) : (
+          `Pay KSh ${orderTotal.toLocaleString()}`
+        )}
+      </Button>
+    </form>
+  );
+}
+
 export default function CheckoutPage() {
   const { state, clearCart } = useCart();
   const [, setLocation] = useLocation();
@@ -53,10 +129,15 @@ export default function CheckoutPage() {
   const [isWaitingForPayment, setIsWaitingForPayment] = useState(false);
   const [paymentPollingEnabled, setPaymentPollingEnabled] = useState(false);
   const [paymentStartTime, setPaymentStartTime] = useState<number | null>(null);
+  const [showStripePayment, setShowStripePayment] = useState(false);
+  const [stripeClientSecret, setStripeClientSecret] = useState<string | null>(null);
   const [paymentTimeoutReached, setPaymentTimeoutReached] = useState(false);
   
   // Payment timeout (5 minutes)
   const PAYMENT_TIMEOUT_MS = 5 * 60 * 1000;
+
+  // Initialize Stripe
+  const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLIC_KEY!);
 
   const deliveryCharges = {
     "nairobi-cbd": 200,
@@ -292,6 +373,58 @@ export default function CheckoutPage() {
     },
   });
 
+  // Create Stripe payment intent
+  const createPaymentIntentMutation = useMutation({
+    mutationFn: async (data: { orderId: string; amount: number }) => {
+      const response = await fetch("/api/create-payment-intent", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ amount: data.amount }),
+      });
+      if (!response.ok) {
+        throw new Error("Failed to create payment intent");
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      setStripeClientSecret(data.clientSecret);
+      setShowStripePayment(true);
+      toast({
+        title: "Payment ready",
+        description: "Please complete your payment below.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Payment setup failed",
+        description: error.message || "Unable to setup payment. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Handle successful Stripe payment
+  const handleStripePaymentSuccess = () => {
+    toast({
+      title: "Payment successful!",
+      description: `Your order #${currentOrderId} has been paid and confirmed.`,
+    });
+    clearCart();
+    setLocation("/");
+  };
+
+  // Handle Stripe payment error  
+  const handleStripePaymentError = (error: string) => {
+    toast({
+      title: "Payment failed",
+      description: error,
+      variant: "destructive",
+    });
+    setShowStripePayment(false);
+  };
+
   const createOrderMutation = useMutation({
     mutationFn: async (orderData: any) => {
       const response = await fetch("/api/orders", {
@@ -316,8 +449,14 @@ export default function CheckoutPage() {
           orderId: data.id,
           phone: phoneToUse,
         });
+      } else if (formData.paymentMethod === "stripe") {
+        // For Stripe, create payment intent
+        createPaymentIntentMutation.mutate({
+          orderId: data.id,
+          amount: total
+        });
       } else {
-        // For Stripe or other payment methods
+        // For other payment methods
         toast({
           title: "Order placed successfully!",
           description: `Your order #${data.id} has been received. We'll contact you soon.`,
@@ -762,6 +901,38 @@ export default function CheckoutPage() {
             </div>
           </div>
         </form>
+
+        {/* Stripe Payment Form */}
+        {showStripePayment && stripeClientSecret && (
+          <div className="mt-8">
+            <Card>
+              <CardHeader>
+                <CardTitle>Complete Payment</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Order #{currentOrderId} • Secure payment with Stripe
+                </p>
+              </CardHeader>
+              <CardContent>
+                <Elements 
+                  stripe={stripePromise} 
+                  options={{ 
+                    clientSecret: stripeClientSecret,
+                    appearance: {
+                      theme: 'stripe'
+                    }
+                  }}
+                >
+                  <StripePaymentForm
+                    clientSecret={stripeClientSecret}
+                    onSuccess={handleStripePaymentSuccess}
+                    onError={handleStripePaymentError}
+                    orderTotal={total}
+                  />
+                </Elements>
+              </CardContent>
+            </Card>
+          </div>
+        )}
       </div>
     </div>
   );
