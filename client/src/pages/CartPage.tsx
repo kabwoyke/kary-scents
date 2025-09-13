@@ -63,7 +63,67 @@ export default function CartPage() {
             {state.items.map((item) => (
               <Card key={item.id} data-testid={`cart-item-${item.id}`}>
                 <CardContent className="p-4">
-                  <div className="flex items-center space-x-4">
+                  {/* Mobile Layout */}
+                  <div className="block sm:hidden">
+                    <div className="flex items-start space-x-3 mb-3">
+                      <img
+                        src={item.image}
+                        alt={item.name}
+                        className="w-16 h-16 object-cover rounded-lg bg-card flex-shrink-0"
+                        data-testid={`img-cart-${item.id}`}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-base font-semibold text-foreground leading-tight mb-1" data-testid={`text-name-${item.id}`}>
+                          {item.name}
+                        </h3>
+                        <Badge variant="secondary" className="text-xs" data-testid={`badge-category-${item.id}`}>
+                          {item.category}
+                        </Badge>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeItem(item.id)}
+                        className="text-destructive hover:text-destructive flex-shrink-0"
+                        data-testid={`button-remove-${item.id}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    
+                    <div className="flex items-center justify-between">
+                      <p className="text-lg font-bold text-primary" data-testid={`text-price-${item.id}`}>
+                        KSh {item.price.toLocaleString()}
+                      </p>
+                      
+                      <div className="flex items-center space-x-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleQuantityUpdate(item.id, item.quantity - 1)}
+                          data-testid={`button-decrease-${item.id}`}
+                        >
+                          <Minus className="h-3 w-3" />
+                        </Button>
+                        
+                        <span className="w-8 text-center font-medium" data-testid={`text-quantity-${item.id}`}>
+                          {item.quantity}
+                        </span>
+                        
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleQuantityUpdate(item.id, item.quantity + 1)}
+                          data-testid={`button-increase-${item.id}`}
+                        >
+                          <Plus className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Desktop Layout */}
+                  <div className="hidden sm:flex items-center space-x-4">
                     <img
                       src={item.image}
                       alt={item.name}
