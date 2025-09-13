@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useState } from "react";
+import { ReviewListCompact } from "@/components/ReviewList";
 
 export interface Product {
   id: string;
@@ -97,6 +98,14 @@ export default function ProductCard({
           <p className="text-sm text-muted-foreground line-clamp-2">
             {product.description}
           </p>
+          
+          {/* Review Information */}
+          <ReviewListCompact 
+            productId={product.id}
+            maxReviews={0}
+            className="pt-1"
+            data-testid={`reviews-${product.id}`}
+          />
         </div>
       </CardContent>
 

@@ -1,11 +1,67 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProductSchema, insertOrderSchema, adminLoginSchema } from "@shared/schema";
+import { insertProductSchema, insertOrderSchema, adminLoginSchema, insertReviewSchema, updateReviewStatusSchema } from "@shared/schema";
 import { z } from "zod";
 import Stripe from "stripe";
 import crypto from "crypto";
 import { mpesaService } from "./mpesa";
+
+// Simple in-memory rate limiting for review submissions
+interface RateLimitEntry {
+  count: number;
+  resetTime: number;
+}
+
+const reviewRateLimit = new Map<string, RateLimitEntry>();
+const REVIEW_RATE_LIMIT_COUNT = 3; // max 3 reviews
+const REVIEW_RATE_LIMIT_WINDOW = 10 * 60 * 1000; // 10 minutes in milliseconds
+
+// Clean up expired rate limit entries periodically
+setInterval(() => {
+  const now = Date.now();
+  const entries = Array.from(reviewRateLimit.entries());
+  for (const [ip, entry] of entries) {
+    if (now > entry.resetTime) {
+      reviewRateLimit.delete(ip);
+    }
+  }
+}, REVIEW_RATE_LIMIT_WINDOW); // Clean every 10 minutes
+
+// Rate limiting middleware for reviews
+function checkReviewRateLimit(req: Request, res: Response, next: NextFunction) {
+  // Get client IP (handle proxy/cloudflare scenarios)
+  const clientIP = req.headers['x-forwarded-for'] as string || 
+                   req.headers['x-real-ip'] as string || 
+                   req.socket.remoteAddress || 
+                   'unknown';
+  
+  const now = Date.now();
+  const rateLimitEntry = reviewRateLimit.get(clientIP);
+  
+  if (!rateLimitEntry || now > rateLimitEntry.resetTime) {
+    // No entry exists or window has expired, create new entry
+    reviewRateLimit.set(clientIP, {
+      count: 1,
+      resetTime: now + REVIEW_RATE_LIMIT_WINDOW
+    });
+    return next();
+  }
+  
+  if (rateLimitEntry.count >= REVIEW_RATE_LIMIT_COUNT) {
+    // Rate limit exceeded
+    const resetInMinutes = Math.ceil((rateLimitEntry.resetTime - now) / (60 * 1000));
+    return res.status(429).json({
+      error: "Too many review submissions",
+      message: `You have exceeded the review submission limit. Please wait ${resetInMinutes} minute(s) before submitting another review.`,
+      retryAfter: rateLimitEntry.resetTime
+    });
+  }
+  
+  // Increment counter and proceed
+  rateLimitEntry.count += 1;
+  next();
+}
 
 // Initialize Stripe - will handle missing key in payment endpoints
 let stripe: Stripe | null = null;
@@ -224,6 +280,118 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error deleting product:", error);
       res.status(500).json({ error: "Failed to delete product" });
+    }
+  });
+
+  // Review routes
+  app.post("/api/products/:id/reviews", checkReviewRateLimit, async (req, res) => {
+    try {
+      const productId = req.params.id;
+      
+      // Verify product exists
+      const product = await storage.getProduct(productId);
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+
+      // Hash phone number if provided for privacy
+      let customerPhoneHash = null;
+      if (req.body.customerPhone) {
+        customerPhoneHash = crypto.createHash('sha256')
+          .update(req.body.customerPhone)
+          .digest('hex');
+      }
+
+      const reviewData = {
+        ...req.body,
+        productId,
+        customerPhoneHash,
+        customerPhone: undefined, // Don't store raw phone
+      };
+      
+      const validatedData = insertReviewSchema.parse(reviewData);
+      const review = await storage.createReview(validatedData);
+      
+      res.status(201).json(review);
+    } catch (error) {
+      console.error("Error creating review:", error);
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: "Invalid review data", details: error.errors });
+      } else {
+        res.status(500).json({ error: "Failed to create review" });
+      }
+    }
+  });
+
+  app.get("/api/products/:id/reviews", async (req, res) => {
+    try {
+      const productId = req.params.id;
+      
+      // Verify product exists
+      const product = await storage.getProduct(productId);
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+
+      // Get approved reviews only for public endpoint
+      const reviews = await storage.getProductReviews(productId, "approved");
+      const averageRating = await storage.getProductAverageRating(productId);
+      
+      res.json({
+        reviews,
+        averageRating: Number(averageRating.toFixed(1)),
+        totalReviews: reviews.length
+      });
+    } catch (error) {
+      console.error("Error fetching reviews:", error);
+      res.status(500).json({ error: "Failed to fetch reviews" });
+    }
+  });
+
+  app.get("/api/admin/reviews", requireAdminAuth, async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 50;
+      const offset = parseInt(req.query.offset as string) || 0;
+      const status = req.query.status as string;
+      
+      // Use getAllReviews for proper filtering - it handles both 'all' and specific status
+      const result = await storage.getAllReviews(status, limit, offset);
+      
+      res.json({
+        reviews: result.reviews,
+        total: result.total,
+        limit,
+        offset
+      });
+    } catch (error) {
+      console.error("Error fetching admin reviews:", error);
+      res.status(500).json({ error: "Failed to fetch reviews" });
+    }
+  });
+
+  app.patch("/api/admin/reviews/:id", requireAdminAuth, async (req, res) => {
+    try {
+      const reviewId = req.params.id;
+      const statusUpdate = updateReviewStatusSchema.parse(req.body);
+      
+      const review = await storage.getReviewById(reviewId);
+      if (!review) {
+        return res.status(404).json({ error: "Review not found" });
+      }
+      
+      const updatedReview = await storage.updateReviewStatus(reviewId, statusUpdate);
+      if (!updatedReview) {
+        return res.status(404).json({ error: "Review not found" });
+      }
+      
+      res.json(updatedReview);
+    } catch (error) {
+      console.error("Error updating review status:", error);
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: "Invalid status data", details: error.errors });
+      } else {
+        res.status(500).json({ error: "Failed to update review status" });
+      }
     }
   });
 

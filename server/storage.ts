@@ -59,6 +59,7 @@ export interface IStorage {
   getReviewById(id: string): Promise<Review | undefined>;
   updateReviewStatus(id: string, status: UpdateReviewStatus): Promise<Review | undefined>;
   getAllPendingReviews(limit?: number, offset?: number): Promise<{ reviews: Review[]; total: number }>;
+  getAllReviews(status?: string, limit?: number, offset?: number): Promise<{ reviews: Review[]; total: number }>;
   getProductAverageRating(productId: string): Promise<number>;
   
   // Mpesa Orders
@@ -267,6 +268,37 @@ export class DatabaseStorage implements IStorage {
         .limit(limit)
         .offset(offset),
       db.select({ count: count() }).from(reviews).where(eq(reviews.status, "pending"))
+    ]);
+    
+    return {
+      reviews: reviewsResult,
+      total: totalResult[0].count
+    };
+  }
+
+  async getAllReviews(status?: string, limit: number = 50, offset: number = 0): Promise<{ reviews: Review[]; total: number }> {
+    if (status) {
+      const [reviewsResult, totalResult] = await Promise.all([
+        db.select().from(reviews)
+          .where(eq(reviews.status, status as any))
+          .orderBy(desc(reviews.createdAt))
+          .limit(limit)
+          .offset(offset),
+        db.select({ count: count() }).from(reviews).where(eq(reviews.status, status as any))
+      ]);
+      
+      return {
+        reviews: reviewsResult,
+        total: totalResult[0].count
+      };
+    }
+    
+    const [reviewsResult, totalResult] = await Promise.all([
+      db.select().from(reviews)
+        .orderBy(desc(reviews.createdAt))
+        .limit(limit)
+        .offset(offset),
+      db.select({ count: count() }).from(reviews)
     ]);
     
     return {
