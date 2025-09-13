@@ -1,12 +1,11 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProductSchema, insertOrderSchema, adminLoginSchema, insertReviewSchema, updateReviewStatusSchema, stripeConfirmPaymentSchema } from "@shared/schema";
+import { insertProductSchema, insertOrderSchema, adminLoginSchema, insertReviewSchema, updateReviewStatusSchema } from "@shared/schema";
 import { z } from "zod";
 import Stripe from "stripe";
 import crypto from "crypto";
 import { mpesaService } from "./mpesa";
-import { sendOrderReceiptEmail, getEmailServiceStatus } from "./email";
 
 // Simple in-memory rate limiting for review submissions
 interface RateLimitEntry {
@@ -605,168 +604,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Confirm Stripe payment and send receipt email - SECURE VERSION
-  app.post("/api/payments/stripe/confirm", async (req, res) => {
-    if (!stripe) {
-      return res.status(500).json({ error: "Payment processing not configured. Missing Stripe keys." });
-    }
-
-    try {
-      // SECURITY: Validate request body with Zod schema
-      const validatedRequest = stripeConfirmPaymentSchema.parse(req.body);
-      const { orderId, paymentIntentId } = validatedRequest;
-
-      // Get the order
-      const order = await storage.getOrder(orderId);
-      if (!order) {
-        console.error(`Payment confirmation failed: Order ${orderId} not found`);
-        return res.status(404).json({ error: "Order not found" });
-      }
-
-      // SECURITY: Verify payment intent with Stripe and perform comprehensive verification
-      const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
-      
-      // SECURITY CHECK 1: Payment must be completed successfully
-      if (paymentIntent.status !== 'succeeded') {
-        console.error(`Payment confirmation failed: Payment not completed`, {
-          orderId,
-          paymentIntentId,
-          status: paymentIntent.status
-        });
-        return res.status(400).json({ 
-          error: "Payment not completed", 
-          status: paymentIntent.status 
-        });
-      }
-
-      // SECURITY CHECK 2: Verify payment amount matches order total
-      const orderTotalCents = order.total; // Already in cents in DB
-      if (paymentIntent.amount !== orderTotalCents) {
-        console.error(`Payment spoofing attempt detected: Amount mismatch`, {
-          orderId,
-          paymentIntentId,
-          expectedAmount: orderTotalCents,
-          actualAmount: paymentIntent.amount
-        });
-        return res.status(400).json({ 
-          error: "Payment amount verification failed",
-          details: "Payment amount does not match order total"
-        });
-      }
-
-      // SECURITY CHECK 3: Verify currency is correct
-      if (paymentIntent.currency !== 'kes') {
-        console.error(`Payment spoofing attempt detected: Currency mismatch`, {
-          orderId,
-          paymentIntentId,
-          expectedCurrency: 'kes',
-          actualCurrency: paymentIntent.currency
-        });
-        return res.status(400).json({ 
-          error: "Payment currency verification failed",
-          details: "Payment currency does not match expected currency"
-        });
-      }
-
-      // SECURITY CHECK 4: Verify this payment was created for this specific order
-      if (!paymentIntent.metadata || paymentIntent.metadata.orderId !== orderId) {
-        console.error(`Payment spoofing attempt detected: Order ID mismatch in metadata`, {
-          orderId,
-          paymentIntentId,
-          expectedOrderId: orderId,
-          actualOrderId: paymentIntent.metadata?.orderId || 'missing'
-        });
-        return res.status(400).json({ 
-          error: "Payment verification failed",
-          details: "Payment was not created for this order"
-        });
-      }
-
-      // SECURITY CHECK 5: Ensure order hasn't already been paid for
-      if (order.paymentMethod === 'stripe' && order.stripePaymentIntentId) {
-        console.warn(`Duplicate payment confirmation attempt for already paid order`, {
-          orderId,
-          existingPaymentIntentId: order.stripePaymentIntentId,
-          newPaymentIntentId: paymentIntentId
-        });
-        return res.status(400).json({ 
-          error: "Order already paid",
-          details: "This order has already been successfully paid"
-        });
-      }
-
-      // All security checks passed - proceed with payment confirmation
-      
-      // Update order with payment intent
-      const updatedOrder = await storage.updateOrderPaymentIntent(orderId, paymentIntentId);
-      if (!updatedOrder) {
-        console.error(`Failed to update order with payment intent`, { orderId, paymentIntentId });
-        return res.status(500).json({ error: "Failed to update order" });
-      }
-
-      // SECURITY: Use proper generic payment update method instead of M-Pesa specific one
-      await storage.updateOrderPayment(orderId, {
-        paymentMethod: 'stripe',
-        paidAt: new Date()
-      });
-
-      console.log(`SECURE: Stripe payment confirmed for order ${orderId}:`, {
-        paymentIntentId,
-        amount: paymentIntent.amount,
-        currency: paymentIntent.currency,
-        verifiedAmount: orderTotalCents,
-        verifiedOrderId: orderId
-      });
-
-      // Send order receipt email
-      try {
-        const orderWithItems = await storage.getOrderWithItems(orderId);
-        if (orderWithItems) {
-          const emailSent = await sendOrderReceiptEmail({
-            order: orderWithItems.order,
-            items: orderWithItems.items
-          });
-          
-          if (emailSent) {
-            console.log(`Order receipt email sent successfully for order ${orderId}`);
-          } else {
-            console.warn(`Failed to send order receipt email for order ${orderId}`);
-          }
-        }
-      } catch (emailError) {
-        console.error(`Error sending order receipt email for order ${orderId}:`, {
-          error: emailError instanceof Error ? emailError.message : 'Unknown error',
-          orderId
-        });
-        // Don't fail the payment confirmation if email fails
-      }
-
-      res.json({ 
-        success: true, 
-        message: "Payment securely confirmed and order updated",
-        orderId,
-        paymentIntentId,
-        verifiedAmount: orderTotalCents / 100, // Convert back to KSh for response
-        verifiedCurrency: 'kes'
-      });
-
-    } catch (error: any) {
-      if (error instanceof z.ZodError) {
-        console.error("Payment confirmation validation error:", error.errors);
-        return res.status(400).json({ 
-          error: "Invalid request data", 
-          details: error.errors 
-        });
-      }
-      
-      console.error("Error confirming Stripe payment:", {
-        error: error.message,
-        stack: error.stack
-      });
-      res.status(500).json({ error: "Payment confirmation failed: " + error.message });
-    }
-  });
-
   // Order routes
   app.post("/api/orders", async (req, res) => {
     try {
@@ -949,20 +786,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Convert amount from cents to KES for Mpesa
       const amount = order.total / 100;
 
-      // Record payment initiation with comprehensive tracking
-      await storage.recordPaymentInitiation(order.id, {
-        orderId: order.id,
-        paymentMethod: 'mpesa',
-        currency: 'KES',
-        initiatedAt: new Date(),
-        retryCount: order.paymentRetryCount || 0,
-      });
-
-      // Increment retry count if this is a retry
-      if (order.paymentInitiatedAt) {
-        await storage.incrementPaymentRetryCount(order.id);
-      }
-
       // Initiate STK Push
       const stkResult = await mpesaService.initiateSTKPush({
         phone: normalizedPhone,
@@ -1105,29 +928,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           amount: callbackDetails.amount,
           expectedAmount: order.total / 100
         });
-
-        // Send order receipt email
-        try {
-          const orderWithItems = await storage.getOrderWithItems(order.id);
-          if (orderWithItems) {
-            const emailSent = await sendOrderReceiptEmail({
-              order: orderWithItems.order,
-              items: orderWithItems.items
-            });
-            
-            if (emailSent) {
-              console.log(`Order receipt email sent successfully for order ${order.id}`);
-            } else {
-              console.warn(`Failed to send order receipt email for order ${order.id}`);
-            }
-          }
-        } catch (emailError) {
-          console.error(`Error sending order receipt email for order ${order.id}:`, {
-            error: emailError instanceof Error ? emailError.message : 'Unknown error',
-            orderId: order.id
-          });
-          // Don't fail the payment processing if email fails
-        }
       } else {
         // Payment failed
         await storage.updateOrderMpesaDetails(order.id, {
