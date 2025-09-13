@@ -1,4 +1,7 @@
 import crypto from "crypto";
+import dotenv from "dotenv"
+
+dotenv.config()
 
 // Environment variables required for Mpesa integration
 // Add these to your environment:

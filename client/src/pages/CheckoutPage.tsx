@@ -506,11 +506,12 @@ export default function CheckoutPage() {
       }
       
       const cleaned = phoneToValidate.replace(/\D/g, '');
-      const phonePattern = /^(254[17][0-9]{7}|0[17][0-9]{7}|[17][0-9]{7})$/;
+   
+      const phonePattern = /^(254(7|1)[0-9]{8}|0(7|1)[0-9]{8})$/;
       
       if (!phonePattern.test(cleaned)) {
         toast({
-          title: "Invalid phone number",
+          title: `Invalid phone number ${phonePattern.test(cleaned)}`,
           description: "Please enter a valid Kenyan mobile number (Safaricom, Airtel, or Telkom).",
           variant: "destructive",
         });
