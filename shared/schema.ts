@@ -226,7 +226,7 @@ export const updateOrderMpesaSchema = z.object({
   mpesaMerchantRequestId: z.string().optional(),
   mpesaCheckoutRequestId: z.string().optional(),
   mpesaReceiptNumber: z.string().optional(),
-  mpesaStatus: z.enum(["initiated", "pending", "paid", "failed"]).optional(),
+  mpesaStatus: z.enum(["initiated", "pending", "paid", "failed", "cancelled"]).optional(),
   mpesaPhone: z.string().optional(),
   paymentMethod: z.enum(["stripe", "mpesa"]).optional(),
   paidAt: z.date().optional(),
@@ -257,7 +257,7 @@ export const updateOrderPaymentSchema = z.object({
   mpesaMerchantRequestId: z.string().optional(),
   mpesaCheckoutRequestId: z.string().optional(),
   mpesaReceiptNumber: z.string().optional(),
-  mpesaStatus: z.enum(["initiated", "pending", "paid", "failed"]).optional(),
+  mpesaStatus: z.enum(["initiated", "pending", "paid", "failed", "cancelled"]).optional(),
   mpesaPhone: z.string().optional(),
 });
 

@@ -1373,8 +1373,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
           amount: callbackDetails.amount,
           expectedAmount: order.total / 100
         });
+      } else if (callbackDetails.resultCode === 1032) {
+        // Payment cancelled by user
+        await storage.updatePayment(payment.id, {
+          status: 'failed',
+          failureReason: callbackDetails.resultDesc || 'Request cancelled by user',
+          failureCode: callbackDetails.resultCode?.toString() || '1032',
+          failedAt: new Date(),
+          processedAt: new Date(),
+          gatewayResponse: req.body,
+        });
+
+        // Update order with cancelled status for proper frontend feedback
+        await storage.updateOrderMpesaDetails(order.id, {
+          mpesaStatus: 'cancelled',
+        });
+
+        console.log(`Payment cancelled by user for order ${order.id}:`, {
+          resultCode: callbackDetails.resultCode,
+          resultDesc: callbackDetails.resultDesc,
+        });
       } else {
-        // Payment failed
+        // Payment failed (other error codes)
         await storage.updatePayment(payment.id, {
           status: 'failed',
           failureReason: callbackDetails.resultDesc || 'Payment failed',
