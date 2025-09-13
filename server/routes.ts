@@ -380,6 +380,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         productId,
         customerPhoneHash,
         customerPhone: undefined, // Don't store raw phone
+        status: "approved", // Auto-approve reviews for better user experience
       };
       
       const validatedData = insertReviewSchema.parse(reviewData);

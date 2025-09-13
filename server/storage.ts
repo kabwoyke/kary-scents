@@ -310,7 +310,7 @@ export class DatabaseStorage implements IStorage {
     return {
       totalProducts: productsCount[0].count,
       totalOrders: ordersCount[0].count,
-      totalRevenue: Number(revenueSum[0].total) || 0,
+      totalRevenue: Number(revenueSum[0].total) / 100 || 0, // Convert from cents to KSh
       recentOrdersCount: recentOrdersCount[0].count
     };
   }
