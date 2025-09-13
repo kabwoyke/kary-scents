@@ -137,7 +137,14 @@ export default function CheckoutPage() {
   const PAYMENT_TIMEOUT_MS = 5 * 60 * 1000;
 
   // Initialize Stripe
-  const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLIC_KEY!);
+  const stripePublicKey = import.meta.env.VITE_STRIPE_PUBLIC_KEY;
+  console.log('Stripe public key available:', !!stripePublicKey);
+  
+  if (!stripePublicKey) {
+    console.error('VITE_STRIPE_PUBLIC_KEY environment variable is not set');
+  }
+  
+  const stripePromise = stripePublicKey ? loadStripe(stripePublicKey) : null;
 
   const deliveryCharges = {
     "nairobi-cbd": 200,
@@ -903,7 +910,7 @@ export default function CheckoutPage() {
         </form>
 
         {/* Stripe Payment Form */}
-        {showStripePayment && stripeClientSecret && (
+        {showStripePayment && stripeClientSecret && stripePromise && (
           <div className="mt-8">
             <Card>
               <CardHeader>
@@ -929,6 +936,22 @@ export default function CheckoutPage() {
                     orderTotal={total}
                   />
                 </Elements>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+        
+        {/* Show error if Stripe is not available */}
+        {showStripePayment && !stripePromise && (
+          <div className="mt-8">
+            <Card>
+              <CardHeader>
+                <CardTitle>Payment Configuration Error</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">
+                  Stripe payment is not available. Please contact support or try Mpesa payment.
+                </p>
               </CardContent>
             </Card>
           </div>
