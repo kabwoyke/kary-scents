@@ -342,6 +342,132 @@ export default function AdminReviewsPage() {
                     Create Review
                   </Button>
                 </DialogTrigger>
+                <DialogContent className="max-w-2xl">
+                  <DialogHeader>
+                    <DialogTitle>Create New Review</DialogTitle>
+                    <DialogDescription>
+                      Create a manual review entry for the admin dashboard
+                    </DialogDescription>
+                  </DialogHeader>
+                  <Form {...form}>
+                    <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <FormField
+                          control={form.control}
+                          name="productId"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Product ID</FormLabel>
+                              <FormControl>
+                                <Input 
+                                  placeholder="Enter product ID" 
+                                  data-testid="input-product-id"
+                                  {...field} 
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name="customerName"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Customer Name</FormLabel>
+                              <FormControl>
+                                <Input 
+                                  placeholder="Enter customer name" 
+                                  data-testid="input-customer-name"
+                                  {...field} 
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                      <FormField
+                        control={form.control}
+                        name="rating"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Rating (1-5 stars)</FormLabel>
+                            <FormControl>
+                              <Input 
+                                type="number"
+                                min="1"
+                                max="5"
+                                placeholder="Enter rating" 
+                                data-testid="input-rating"
+                                {...field}
+                                onChange={(e) => field.onChange(parseInt(e.target.value) || 1)}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="content"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Review Content</FormLabel>
+                            <FormControl>
+                              <Textarea 
+                                placeholder="Enter review content" 
+                                className="min-h-[100px]"
+                                data-testid="input-content"
+                                {...field} 
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="status"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Status</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value}>
+                              <FormControl>
+                                <SelectTrigger data-testid="select-status">
+                                  <SelectValue placeholder="Select status" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="pending">Pending</SelectItem>
+                                <SelectItem value="approved">Approved</SelectItem>
+                                <SelectItem value="rejected">Rejected</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <div className="flex justify-end gap-3 pt-4">
+                        <Button 
+                          type="button" 
+                          variant="outline" 
+                          onClick={() => setIsCreateDialogOpen(false)}
+                          data-testid="button-cancel-create"
+                        >
+                          Cancel
+                        </Button>
+                        <Button 
+                          type="submit" 
+                          disabled={createReviewMutation.isPending}
+                          data-testid="button-save-review"
+                        >
+                          {createReviewMutation.isPending ? "Creating..." : "Create Review"}
+                        </Button>
+                      </div>
+                    </form>
+                  </Form>
+                </DialogContent>
               </Dialog>
               <Button
                 variant="outline"
