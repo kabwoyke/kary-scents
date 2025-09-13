@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import cookieParser from "cookie-parser";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { closeDatabase } from "./db";
 
 const app = express();
 app.use(express.json());
@@ -69,5 +70,44 @@ app.use((req, res, next) => {
     reusePort: true,
   }, () => {
     log(`serving on port ${port}`);
+  });
+
+  // Graceful shutdown handlers
+  const gracefulShutdown = async (signal: string) => {
+    log(`Received ${signal}. Starting graceful shutdown...`);
+    
+    try {
+      // Close HTTP server first
+      await new Promise<void>((resolve) => {
+        server.close(() => {
+          log('HTTP server closed');
+          resolve();
+        });
+      });
+
+      // Close database connection pool
+      await closeDatabase();
+      
+      log('Graceful shutdown completed');
+      process.exit(0);
+    } catch (error) {
+      console.error('Error during graceful shutdown:', error);
+      process.exit(1);
+    }
+  };
+
+  // Handle process termination signals
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  
+  // Handle uncaught exceptions and unhandled promise rejections
+  process.on('uncaughtException', (error) => {
+    console.error('Uncaught Exception:', error);
+    gracefulShutdown('uncaughtException');
+  });
+
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+    gracefulShutdown('unhandledRejection');
   });
 })();
