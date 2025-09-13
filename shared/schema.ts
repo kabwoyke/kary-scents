@@ -130,6 +130,25 @@ export const updateOrderMpesaSchema = z.object({
   paidAt: z.date().optional(),
 });
 
+// Stripe payment confirmation schema
+export const stripeConfirmPaymentSchema = z.object({
+  orderId: z.string().min(1, "Order ID is required"),
+  paymentIntentId: z.string().min(1, "Payment Intent ID is required"),
+});
+
+// Generic payment update schema (replaces M-Pesa specific one for general use)
+export const updateOrderPaymentSchema = z.object({
+  paymentMethod: z.enum(["stripe", "mpesa"]).optional(),
+  paidAt: z.date().optional(),
+  stripePaymentIntentId: z.string().optional(),
+  // M-Pesa specific fields
+  mpesaMerchantRequestId: z.string().optional(),
+  mpesaCheckoutRequestId: z.string().optional(),
+  mpesaReceiptNumber: z.string().optional(),
+  mpesaStatus: z.enum(["initiated", "pending", "paid", "failed"]).optional(),
+  mpesaPhone: z.string().optional(),
+});
+
 // Types
 export type Product = typeof products.$inferSelect;
 export type InsertProduct = z.infer<typeof insertProductSchema>;
@@ -144,3 +163,5 @@ export type InsertAdminSession = z.infer<typeof insertAdminSessionSchema>;
 export type AdminLoginData = z.infer<typeof adminLoginSchema>;
 export type UpdateReviewStatus = z.infer<typeof updateReviewStatusSchema>;
 export type UpdateOrderMpesa = z.infer<typeof updateOrderMpesaSchema>;
+export type StripeConfirmPayment = z.infer<typeof stripeConfirmPaymentSchema>;
+export type UpdateOrderPayment = z.infer<typeof updateOrderPaymentSchema>;

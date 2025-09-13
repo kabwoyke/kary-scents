@@ -43,7 +43,7 @@ function StripePaymentForm({
   orderTotal 
 }: { 
   clientSecret: string; 
-  onSuccess: () => void; 
+  onSuccess: (paymentIntentId: string) => void; 
   onError: (error: string) => void;
   orderTotal: number;
 }) {
@@ -60,7 +60,7 @@ function StripePaymentForm({
 
     setIsProcessing(true);
 
-    const { error } = await stripe.confirmPayment({
+    const { error, paymentIntent } = await stripe.confirmPayment({
       elements,
       confirmParams: {
         return_url: `${window.location.origin}/checkout`,
@@ -72,8 +72,10 @@ function StripePaymentForm({
 
     if (error) {
       onError(error.message || "Payment failed");
+    } else if (paymentIntent && paymentIntent.status === 'succeeded') {
+      onSuccess(paymentIntent.id);
     } else {
-      onSuccess();
+      onError("Payment confirmation failed");
     }
   };
 
@@ -412,14 +414,57 @@ export default function CheckoutPage() {
     },
   });
 
+  // Stripe payment confirmation mutation
+  const confirmStripePaymentMutation = useMutation({
+    mutationFn: async (data: { orderId: string; paymentIntentId: string }) => {
+      const response = await fetch("/api/payments/stripe/confirm", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to confirm payment");
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Payment successful!",
+        description: `Your order #${data.orderId} has been paid and confirmed. A receipt has been sent to your email.`,
+      });
+      clearCart();
+      setShowStripePayment(false);
+      setTimeout(() => {
+        setLocation("/");
+      }, 2000);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Payment confirmation failed",
+        description: error.message || "Unable to confirm payment. Please contact support.",
+        variant: "destructive",
+      });
+      setShowStripePayment(false);
+    },
+  });
+
   // Handle successful Stripe payment
-  const handleStripePaymentSuccess = () => {
-    toast({
-      title: "Payment successful!",
-      description: `Your order #${currentOrderId} has been paid and confirmed.`,
-    });
-    clearCart();
-    setLocation("/");
+  const handleStripePaymentSuccess = (paymentIntentId: string) => {
+    if (currentOrderId) {
+      confirmStripePaymentMutation.mutate({
+        orderId: currentOrderId,
+        paymentIntentId
+      });
+    } else {
+      toast({
+        title: "Error",
+        description: "Order ID not found. Please contact support.",
+        variant: "destructive",
+      });
+    }
   };
 
   // Handle Stripe payment error  

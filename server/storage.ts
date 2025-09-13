@@ -9,6 +9,7 @@ import {
   type InsertReview,
   type UpdateReviewStatus,
   type UpdateOrderMpesa,
+  type UpdateOrderPayment,
   type AdminSession,
   type InsertAdminSession,
   products,
@@ -34,6 +35,7 @@ export interface IStorage {
   getOrderWithItems(id: string): Promise<{ order: Order; items: OrderItem[] } | undefined>;
   updateOrderStatus(id: string, status: string): Promise<Order | undefined>;
   updateOrderPaymentIntent(id: string, paymentIntentId: string): Promise<Order | undefined>;
+  updateOrderPayment(id: string, updates: UpdateOrderPayment): Promise<Order | undefined>;
   
   // Admin Orders Management
   getAllOrders(limit?: number, offset?: number): Promise<{ orders: Order[]; total: number }>;
@@ -141,6 +143,15 @@ export class DatabaseStorage implements IStorage {
     const result = await db
       .update(orders)
       .set({ stripePaymentIntentId: paymentIntentId, updatedAt: new Date() })
+      .where(eq(orders.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async updateOrderPayment(id: string, updates: UpdateOrderPayment): Promise<Order | undefined> {
+    const result = await db
+      .update(orders)
+      .set({ ...updates, updatedAt: new Date() })
       .where(eq(orders.id, id))
       .returning();
     return result[0];
