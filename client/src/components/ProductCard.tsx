@@ -54,7 +54,7 @@ export default function ProductCard({
     : 0;
 
   return (
-    <Card className="group hover-elevate transition-all duration-300 overflow-hidden" data-testid={`card-product-${product.id}`}>
+    <Card className="group hover-elevate transition-all duration-300 overflow-hidden border-card-border shadow-sm" data-testid={`card-product-${product.id}`}>
       <div className="relative aspect-square overflow-hidden">
         <img 
           src={product.image} 
@@ -80,7 +80,7 @@ export default function ProductCard({
         <Button
           variant="ghost"
           size="icon"
-          className="absolute top-2 right-2 bg-white/80 hover:bg-white text-black hover-elevate"
+          className="absolute top-2 right-2 bg-white/90 hover:bg-white text-gray-700 hover:text-gray-900 backdrop-blur-sm"
           onClick={handleToggleFavorite}
           data-testid={`button-favorite-${product.id}`}
         >
@@ -125,11 +125,11 @@ export default function ProductCard({
         </div>
 
         <div className="flex gap-2 w-full">
-          <Link href={`/product/${product.id}`}>
+          <Link href={`/product/${product.id}`} className="flex-1">
             <Button 
               variant="outline"
               size="sm"
-              className="flex-1 hover-elevate"
+              className="w-full"
               data-testid={`button-view-details-${product.id}`}
             >
               <Eye className="h-4 w-4 mr-1" />
@@ -138,10 +138,11 @@ export default function ProductCard({
           </Link>
           
           <Button 
+            variant="default"
             size="sm"
             onClick={handleAddToCart}
             disabled={isLoading}
-            className="flex-1 hover-elevate"
+            className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground"
             data-testid={`button-add-to-cart-${product.id}`}
           >
             {isLoading ? (
