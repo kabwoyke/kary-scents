@@ -252,12 +252,28 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateReviewStatus(id: string, status: UpdateReviewStatus): Promise<Review | undefined> {
-    const result = await db
-      .update(reviews)
-      .set(status)
-      .where(eq(reviews.id, id))
-      .returning();
-    return result[0];
+    console.log("Updating review status in database:", {
+      reviewId: id,
+      statusUpdate: status
+    });
+    
+    try {
+      const result = await db
+        .update(reviews)
+        .set(status)
+        .where(eq(reviews.id, id))
+        .returning();
+      
+      console.log("Database update result:", {
+        rowsAffected: result.length,
+        updatedReview: result[0]
+      });
+      
+      return result[0];
+    } catch (error) {
+      console.error("Database error in updateReviewStatus:", error);
+      throw error;
+    }
   }
 
   async getAllPendingReviews(limit: number = 50, offset: number = 0): Promise<{ reviews: Review[]; total: number }> {

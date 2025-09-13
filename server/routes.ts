@@ -17,16 +17,86 @@ const reviewRateLimit = new Map<string, RateLimitEntry>();
 const REVIEW_RATE_LIMIT_COUNT = 3; // max 3 reviews
 const REVIEW_RATE_LIMIT_WINDOW = 10 * 60 * 1000; // 10 minutes in milliseconds
 
+// Admin login rate limiting
+const adminLoginRateLimit = new Map<string, RateLimitEntry>();
+const ADMIN_LOGIN_RATE_LIMIT_COUNT = 5; // max 5 failed attempts
+const ADMIN_LOGIN_RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes in milliseconds
+
 // Clean up expired rate limit entries periodically
 setInterval(() => {
   const now = Date.now();
-  const entries = Array.from(reviewRateLimit.entries());
-  for (const [ip, entry] of entries) {
+  
+  // Clean up review rate limits
+  const reviewEntries = Array.from(reviewRateLimit.entries());
+  for (const [ip, entry] of reviewEntries) {
     if (now > entry.resetTime) {
       reviewRateLimit.delete(ip);
     }
   }
-}, REVIEW_RATE_LIMIT_WINDOW); // Clean every 10 minutes
+  
+  // Clean up admin login rate limits
+  const adminEntries = Array.from(adminLoginRateLimit.entries());
+  for (const [ip, entry] of adminEntries) {
+    if (now > entry.resetTime) {
+      adminLoginRateLimit.delete(ip);
+    }
+  }
+}, Math.min(REVIEW_RATE_LIMIT_WINDOW, ADMIN_LOGIN_RATE_LIMIT_WINDOW)); // Clean at shortest interval
+
+// Rate limiting middleware for admin login
+function checkAdminLoginRateLimit(req: Request, res: Response, next: NextFunction) {
+  // Get client IP (handle proxy/cloudflare scenarios)
+  const clientIP = req.headers['x-forwarded-for'] as string || 
+                   req.headers['x-real-ip'] as string || 
+                   req.socket.remoteAddress || 
+                   'unknown';
+  
+  const now = Date.now();
+  const rateLimitEntry = adminLoginRateLimit.get(clientIP);
+  
+  if (!rateLimitEntry || now > rateLimitEntry.resetTime) {
+    // No entry exists or window has expired - allow the attempt but don't increment yet
+    return next();
+  }
+  
+  if (rateLimitEntry.count >= ADMIN_LOGIN_RATE_LIMIT_COUNT) {
+    // Rate limit exceeded
+    const resetInMinutes = Math.ceil((rateLimitEntry.resetTime - now) / (60 * 1000));
+    console.warn(`Admin login attempt blocked for IP ${clientIP} - rate limit exceeded`);
+    return res.status(429).json({
+      error: "Too many login attempts",
+      message: `Account temporarily locked. Please wait ${resetInMinutes} minute(s) before trying again.`,
+      retryAfter: rateLimitEntry.resetTime
+    });
+  }
+  
+  // Allow attempt to proceed (will be incremented on failure)
+  next();
+}
+
+// Helper function to record failed admin login attempt
+function recordFailedAdminLogin(req: Request) {
+  const clientIP = req.headers['x-forwarded-for'] as string || 
+                   req.headers['x-real-ip'] as string || 
+                   req.socket.remoteAddress || 
+                   'unknown';
+  
+  const now = Date.now();
+  const rateLimitEntry = adminLoginRateLimit.get(clientIP);
+  
+  if (!rateLimitEntry || now > rateLimitEntry.resetTime) {
+    // Create new entry or reset expired entry
+    adminLoginRateLimit.set(clientIP, {
+      count: 1,
+      resetTime: now + ADMIN_LOGIN_RATE_LIMIT_WINDOW
+    });
+  } else {
+    // Increment existing entry
+    rateLimitEntry.count += 1;
+  }
+  
+  console.warn(`Failed admin login attempt from IP ${clientIP} (attempt ${rateLimitEntry?.count || 1}/${ADMIN_LOGIN_RATE_LIMIT_COUNT})`);
+}
 
 // Rate limiting middleware for reviews
 function checkReviewRateLimit(req: Request, res: Response, next: NextFunction) {
@@ -105,7 +175,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Admin Authentication Routes
-  app.post("/api/admin/login", async (req, res) => {
+  app.post("/api/admin/login", checkAdminLoginRateLimit, async (req, res) => {
     try {
       const { password } = adminLoginSchema.parse(req.body);
       
@@ -115,6 +185,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       if (password !== process.env.ADMIN_PASSWORD) {
+        // Record failed login attempt for rate limiting
+        recordFailedAdminLogin(req);
         return res.status(401).json({ error: "Invalid password" });
       }
       
@@ -371,18 +443,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/admin/reviews/:id", requireAdminAuth, async (req, res) => {
     try {
+      console.log("Review update request:", {
+        reviewId: req.params.id,
+        body: req.body,
+        adminSession: (req as any).adminSession?.id
+      });
+      
       const reviewId = req.params.id;
       const statusUpdate = updateReviewStatusSchema.parse(req.body);
       
+      console.log("Parsed status update:", statusUpdate);
+      
       const review = await storage.getReviewById(reviewId);
       if (!review) {
+        console.error("Review not found for ID:", reviewId);
         return res.status(404).json({ error: "Review not found" });
       }
       
+      console.log("Found review before update:", {
+        id: review.id,
+        currentStatus: review.status,
+        productId: review.productId
+      });
+      
       const updatedReview = await storage.updateReviewStatus(reviewId, statusUpdate);
       if (!updatedReview) {
+        console.error("Failed to update review - no result returned");
         return res.status(404).json({ error: "Review not found" });
       }
+      
+      console.log("Review updated successfully:", {
+        id: updatedReview.id,
+        oldStatus: review.status,
+        newStatus: updatedReview.status
+      });
       
       res.json(updatedReview);
     } catch (error) {
@@ -392,6 +486,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         res.status(500).json({ error: "Failed to update review status" });
       }
+    }
+  });
+
+  // Admin Products endpoint (distinct from public products)
+  app.get("/api/admin/products", requireAdminAuth, async (req, res) => {
+    try {
+      const products = await storage.getAllProducts();
+      // Convert prices from cents to KSh for frontend
+      const productsWithPrices = products.map(product => ({
+        ...product,
+        price: product.price / 100,
+        originalPrice: product.originalPrice ? product.originalPrice / 100 : undefined,
+      }));
+      res.json(productsWithPrices);
+    } catch (error) {
+      console.error("Error fetching admin products:", error);
+      res.status(500).json({ error: "Failed to fetch products" });
     }
   });
 
@@ -496,7 +607,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Order routes
   app.post("/api/orders", async (req, res) => {
     try {
+      // Security: Order creation details logged for debugging (PII removed)
+      console.log("Order creation initiated:", {
+        hasOrder: !!req.body.order,
+        hasItems: Array.isArray(req.body.items),
+        itemCount: req.body.items?.length || 0
+      });
       const { order, items } = req.body;
+      
+      // Check if order exists and has required properties
+      if (!order) {
+        console.error("Order object is missing from request body");
+        return res.status(400).json({ error: "Order data is required" });
+      }
+      
+      if (!items || !Array.isArray(items)) {
+        console.error("Items array is missing from request body");
+        return res.status(400).json({ error: "Items array is required" });
+      }
+      
+      // Check if order has the required numeric properties
+      if (typeof order.deliveryCharge !== 'number' || 
+          typeof order.subtotal !== 'number' || 
+          typeof order.total !== 'number') {
+        console.error("Order missing numeric properties:", {
+          deliveryCharge: order.deliveryCharge,
+          subtotal: order.subtotal,
+          total: order.total
+        });
+        return res.status(400).json({ error: "Order must include deliveryCharge, subtotal, and total as numbers" });
+      }
       
       // Convert prices from KSh to cents for storage
       const orderData = {
@@ -691,7 +831,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     let callbackProcessed = false;
     
     try {
-      console.log("Mpesa callback received:", JSON.stringify(req.body, null, 2));
+      // Security: Mpesa callback received (sensitive data not logged)
+      console.log("Mpesa callback received:", {
+        hasBody: !!req.body,
+        checkoutRequestId: req.body?.Body?.stkCallback?.CheckoutRequestID ? "[PRESENT]" : "[MISSING]",
+        resultCode: req.body?.Body?.stkCallback?.ResultCode
+      });
 
       // Extract auth token from headers
       const authToken = req.headers['x-mpesa-auth-token'] as string;
