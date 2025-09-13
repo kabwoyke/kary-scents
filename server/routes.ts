@@ -572,16 +572,100 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const stats = await storage.getAdminStats();
       
-      // Convert revenue from cents to KSh for frontend
+      // Keep revenue in cents for consistent API - client will format for display
       const statsWithPrice = {
         ...stats,
-        totalRevenue: stats.totalRevenue / 100
+        totalRevenue: stats.totalRevenue
       };
       
       res.json(statsWithPrice);
     } catch (error) {
       console.error("Error fetching admin stats:", error);
       res.status(500).json({ error: "Failed to fetch stats" });
+    }
+  });
+
+  // Admin Payment Management Routes
+  app.get("/api/admin/payments", requireAdminAuth, async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 50;
+      const offset = parseInt(req.query.offset as string) || 0;
+      const methodParam = req.query.method as string;
+      const status = req.query.status as string;
+      const search = req.query.search as string;
+      
+      let result;
+      
+      // Support combined filtering (method AND status)
+      const hasMethodFilter = methodParam && methodParam !== 'all' && (methodParam === 'stripe' || methodParam === 'mpesa');
+      const hasStatusFilter = status && status !== 'all';
+      
+      if (hasMethodFilter && hasStatusFilter) {
+        // Get all payments and filter both method and status
+        const allPayments = await storage.getAllPayments(limit * 2, offset); // Get more to allow for filtering
+        const filteredPayments = allPayments.payments.filter(payment => 
+          payment.paymentMethod === methodParam && payment.status === status
+        );
+        result = {
+          payments: filteredPayments.slice(0, limit),
+          total: filteredPayments.length
+        };
+      } else if (hasMethodFilter) {
+        result = await storage.getPaymentsByMethod(methodParam as 'stripe' | 'mpesa', limit, offset);
+      } else if (hasStatusFilter) {
+        result = await storage.getPaymentsByStatus(status, limit, offset);
+      } else {
+        result = await storage.getAllPayments(limit, offset);
+      }
+      
+      let filteredPayments = result.payments;
+      
+      // Apply search filter if provided
+      if (search && search.trim()) {
+        const searchTerm = search.trim().toLowerCase();
+        filteredPayments = filteredPayments.filter(payment => 
+          payment.orderId.toLowerCase().includes(searchTerm) ||
+          (payment.transactionId && payment.transactionId.toLowerCase().includes(searchTerm))
+        );
+      }
+      
+      // Keep amounts in cents for consistent API - client will format for display
+      const paymentsWithPrices = filteredPayments.map(payment => ({
+        ...payment,
+        amount: payment.amount,
+        processingFee: payment.processingFee,
+      }));
+      
+      res.json({
+        payments: paymentsWithPrices,
+        total: search ? filteredPayments.length : result.total,
+        limit,
+        offset
+      });
+    } catch (error) {
+      console.error("Error fetching admin payments:", error);
+      res.status(500).json({ error: "Failed to fetch payments" });
+    }
+  });
+
+  app.get("/api/admin/payments/analytics", requireAdminAuth, async (req, res) => {
+    try {
+      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
+      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
+      
+      const analytics = await storage.getPaymentAnalytics(startDate, endDate);
+      
+      // Keep amounts in cents for consistent API - client will format for display
+      const analyticsWithPrices = {
+        ...analytics,
+        totalRevenue: analytics.totalRevenue,
+        averageProcessingFee: analytics.averageProcessingFee,
+      };
+      
+      res.json(analyticsWithPrices);
+    } catch (error) {
+      console.error("Error fetching payment analytics:", error);
+      res.status(500).json({ error: "Failed to fetch payment analytics" });
     }
   });
 
@@ -592,15 +676,265 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     try {
-      const { amount } = req.body; // Amount in KSh
+      const { amount, orderId } = req.body; // Amount in KSh and orderId for metadata
+      
+      if (!orderId) {
+        return res.status(400).json({ error: "Order ID is required to create payment intent" });
+      }
+      
       const paymentIntent = await stripe.paymentIntents.create({
         amount: Math.round(amount * 100), // Convert to cents
         currency: "kes", // Kenyan Shilling
+        metadata: {
+          orderId: orderId,
+          source: "kary-scents-web"
+        }
       });
+      
+      console.log(`Stripe payment intent created:`, {
+        paymentIntentId: paymentIntent.id,
+        orderId,
+        amount: paymentIntent.amount,
+        currency: paymentIntent.currency
+      });
+      
       res.json({ clientSecret: paymentIntent.client_secret });
     } catch (error: any) {
       console.error("Error creating payment intent:", error);
       res.status(500).json({ error: "Error creating payment intent: " + error.message });
+    }
+  });
+
+  // Confirm Stripe payment and send receipt email - SECURE VERSION
+  app.post("/api/payments/stripe/confirm", async (req, res) => {
+    if (!stripe) {
+      return res.status(500).json({ error: "Payment processing not configured. Missing Stripe keys." });
+    }
+
+    try {
+      // SECURITY: Validate request body with Zod schema
+      const validatedRequest = stripeConfirmPaymentSchema.parse(req.body);
+      const { orderId, paymentIntentId } = validatedRequest;
+
+      // Get the order
+      const order = await storage.getOrder(orderId);
+      if (!order) {
+        console.error(`Payment confirmation failed: Order ${orderId} not found`);
+        return res.status(404).json({ error: "Order not found" });
+      }
+
+      // SECURITY: Verify payment intent with Stripe and perform comprehensive verification
+      const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+      
+      // SECURITY CHECK 1: Payment must be completed successfully
+      if (paymentIntent.status !== 'succeeded') {
+        console.error(`Payment confirmation failed: Payment not completed`, {
+          orderId,
+          paymentIntentId,
+          status: paymentIntent.status
+        });
+        return res.status(400).json({ 
+          error: "Payment not completed", 
+          status: paymentIntent.status 
+        });
+      }
+
+      // SECURITY CHECK 2: Verify payment amount matches order total
+      const orderTotalCents = order.total; // Already in cents in DB
+      if (paymentIntent.amount !== orderTotalCents) {
+        console.error(`Payment spoofing attempt detected: Amount mismatch`, {
+          orderId,
+          paymentIntentId,
+          expectedAmount: orderTotalCents,
+          actualAmount: paymentIntent.amount
+        });
+        return res.status(400).json({ 
+          error: "Payment amount verification failed",
+          details: "Payment amount does not match order total"
+        });
+      }
+
+      // SECURITY CHECK 3: Verify currency is correct
+      if (paymentIntent.currency !== 'kes') {
+        console.error(`Payment spoofing attempt detected: Currency mismatch`, {
+          orderId,
+          paymentIntentId,
+          expectedCurrency: 'kes',
+          actualCurrency: paymentIntent.currency
+        });
+        return res.status(400).json({ 
+          error: "Payment currency verification failed",
+          details: "Payment currency does not match expected currency"
+        });
+      }
+
+      // SECURITY CHECK 4: Verify this payment was created for this specific order
+      if (!paymentIntent.metadata || paymentIntent.metadata.orderId !== orderId) {
+        console.error(`Payment spoofing attempt detected: Order ID mismatch in metadata`, {
+          orderId,
+          paymentIntentId,
+          expectedOrderId: orderId,
+          actualOrderId: paymentIntent.metadata?.orderId || 'missing'
+        });
+        return res.status(400).json({ 
+          error: "Payment verification failed",
+          details: "Payment was not created for this order"
+        });
+      }
+
+      // SECURITY CHECK 5: Ensure order hasn't already been paid for
+      if (order.paymentMethod === 'stripe' && order.stripePaymentIntentId) {
+        console.warn(`Duplicate payment confirmation attempt for already paid order`, {
+          orderId,
+          existingPaymentIntentId: order.stripePaymentIntentId,
+          newPaymentIntentId: paymentIntentId
+        });
+        return res.status(400).json({ 
+          error: "Order already paid",
+          details: "This order has already been successfully paid"
+        });
+      }
+
+      // All security checks passed - proceed with payment confirmation
+      
+      // Check if payment record already exists (for idempotency)
+      let payment = await storage.getPaymentByTransactionId(paymentIntentId);
+      
+      if (!payment) {
+        // Create payment record in payments table
+        payment = await storage.createPayment({
+          orderId: order.id,
+          paymentMethod: 'stripe',
+          amount: order.total, // Keep in cents for consistency
+          currency: 'KES',
+          status: 'completed', // Stripe payments are confirmed when we reach this point
+          transactionId: paymentIntentId,
+          stripePaymentIntentId: paymentIntentId,
+          stripeChargeId: paymentIntent.latest_charge as string,
+          processingFee: Math.round((paymentIntent.amount * 0.036) + 15), // Stripe KE fees: 3.6% + KSh 15
+          gatewayResponse: {
+            paymentIntent: {
+              id: paymentIntent.id,
+              status: paymentIntent.status,
+              amount: paymentIntent.amount,
+              currency: paymentIntent.currency,
+              created: paymentIntent.created
+            }
+          },
+          initiatedAt: new Date(paymentIntent.created * 1000),
+          processedAt: new Date(),
+          completedAt: new Date(),
+        });
+        
+        console.log(`Created Stripe payment record:`, {
+          paymentId: payment.id,
+          orderId: order.id,
+          amount: payment.amount,
+          transactionId: paymentIntentId
+        });
+      } else {
+        // Update existing payment record to completed
+        const updatedPayment = await storage.updatePayment(payment.id, {
+          status: 'completed',
+          stripeChargeId: paymentIntent.latest_charge as string,
+          processingFee: Math.round((paymentIntent.amount * 0.036) + 15), // Stripe KE fees: 3.6% + KSh 15
+          gatewayResponse: {
+            paymentIntent: {
+              id: paymentIntent.id,
+              status: paymentIntent.status,
+              amount: paymentIntent.amount,
+              currency: paymentIntent.currency,
+              created: paymentIntent.created
+            }
+          },
+          processedAt: new Date(),
+          completedAt: new Date(),
+        });
+        
+        if (updatedPayment) {
+          payment = updatedPayment;
+          console.log(`Updated Stripe payment record to completed:`, {
+            paymentId: payment.id,
+            orderId: order.id,
+            transactionId: paymentIntentId
+          });
+        } else {
+          console.error(`Failed to update Stripe payment record:`, {
+            paymentId: payment.id,
+            orderId: order.id,
+            transactionId: paymentIntentId
+          });
+          return res.status(500).json({ error: "Failed to update payment record" });
+        }
+      }
+      
+      // Update order with payment intent
+      const updatedOrder = await storage.updateOrderPaymentIntent(orderId, paymentIntentId);
+      if (!updatedOrder) {
+        console.error(`Failed to update order with payment intent`, { orderId, paymentIntentId });
+        return res.status(500).json({ error: "Failed to update order" });
+      }
+
+      // SECURITY: Use proper generic payment update method instead of M-Pesa specific one
+      await storage.updateOrderPayment(orderId, {
+        paymentMethod: 'stripe',
+        paidAt: new Date()
+      });
+
+      console.log(`SECURE: Stripe payment confirmed for order ${orderId}:`, {
+        paymentIntentId,
+        amount: paymentIntent.amount,
+        currency: paymentIntent.currency,
+        verifiedAmount: orderTotalCents,
+        verifiedOrderId: orderId
+      });
+
+      // Send order receipt email
+      try {
+        const orderWithItems = await storage.getOrderWithItems(orderId);
+        if (orderWithItems) {
+          const emailSent = await sendOrderReceiptEmail({
+            order: orderWithItems.order,
+            items: orderWithItems.items
+          });
+          
+          if (emailSent) {
+            console.log(`Order receipt email sent successfully for order ${orderId}`);
+          } else {
+            console.warn(`Failed to send order receipt email for order ${orderId}`);
+          }
+        }
+      } catch (emailError) {
+        console.error(`Error sending order receipt email for order ${orderId}:`, {
+          error: emailError instanceof Error ? emailError.message : 'Unknown error',
+          orderId
+        });
+        // Don't fail the payment confirmation if email fails
+      }
+
+      res.json({ 
+        success: true, 
+        message: "Payment securely confirmed and order updated",
+        orderId,
+        paymentIntentId,
+        verifiedAmount: orderTotalCents / 100, // Convert back to KSh for response
+        verifiedCurrency: 'kes'
+      });
+
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        console.error("Payment confirmation validation error:", error.errors);
+        return res.status(400).json({ 
+          error: "Invalid request data", 
+          details: error.errors 
+        });
+      }
+      
+      console.error("Error confirming Stripe payment:", {
+        error: error.message,
+        stack: error.stack
+      });
+      res.status(500).json({ error: "Payment confirmation failed: " + error.message });
     }
   });
 
@@ -701,51 +1035,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Rate limiting for payment initiation (in-memory store for simplicity)
-  const paymentAttempts = new Map<string, { count: number; resetTime: number }>();
-  const PAYMENT_RATE_LIMIT = 3; // Max 3 attempts per 10 minutes per IP
-  const PAYMENT_RATE_WINDOW = 10 * 60 * 1000; // 10 minutes
-
-  function checkRateLimit(ip: string): { allowed: boolean; remaining: number; resetTime: number } {
-    const now = Date.now();
-    const attempts = paymentAttempts.get(ip) || { count: 0, resetTime: now + PAYMENT_RATE_WINDOW };
-    
-    // Reset if window expired
-    if (now > attempts.resetTime) {
-      attempts.count = 0;
-      attempts.resetTime = now + PAYMENT_RATE_WINDOW;
-    }
-    
-    if (attempts.count >= PAYMENT_RATE_LIMIT) {
-      return { allowed: false, remaining: 0, resetTime: attempts.resetTime };
-    }
-    
-    attempts.count++;
-    paymentAttempts.set(ip, attempts);
-    
-    return { 
-      allowed: true, 
-      remaining: PAYMENT_RATE_LIMIT - attempts.count, 
-      resetTime: attempts.resetTime 
-    };
-  }
+  // Payment rate limiting has been removed for better user experience
 
   // Mpesa Payment Routes
   app.post("/api/payments/mpesa/initiate", async (req, res) => {
     try {
       const { orderId, phone } = req.body;
-      const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
-
-      // Check rate limiting
-      const rateLimit = checkRateLimit(clientIp);
-      if (!rateLimit.allowed) {
-        const resetTime = new Date(rateLimit.resetTime);
-        return res.status(429).json({ 
-          error: "Too many payment attempts. Please try again later.",
-          resetTime: resetTime.toISOString(),
-          remainingAttempts: 0
-        });
-      }
 
       if (!mpesaService.isConfigured()) {
         return res.status(500).json({ 
@@ -795,7 +1090,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         transactionDesc: `Payment for KARY SCENTS order ${order.id.substring(0, 8)}`,
       });
 
-      // Update order with Mpesa details
+      // Create payment record in new payments table
+      await storage.createPayment({
+        orderId: order.id,
+        paymentMethod: 'mpesa',
+        amount: order.total, // Keep in cents for consistency
+        currency: 'KES',
+        status: 'pending',
+        mpesaMerchantRequestId: stkResult.merchantRequestID,
+        mpesaCheckoutRequestId: stkResult.checkoutRequestID,
+        mpesaPhone: normalizedPhone,
+        initiatedAt: new Date(),
+        retryCount: order.paymentRetryCount || 0,
+      });
+
+      // Update order with minimal payment info for backward compatibility
       await storage.updateOrderMpesaDetails(order.id, {
         mpesaMerchantRequestId: stkResult.merchantRequestID,
         mpesaCheckoutRequestId: stkResult.checkoutRequestID,
@@ -875,9 +1184,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       orderFound = true;
 
+      // Find payment record by CheckoutRequestID
+      const payment = await storage.getPaymentByMpesaCheckoutId(
+        callbackDetails.checkoutRequestID
+      );
+
+      if (!payment) {
+        console.error("Payment record not found for CheckoutRequestID:", callbackDetails.checkoutRequestID);
+        return res.status(404).json({ error: "Payment record not found" });
+      }
+
       // Idempotent processing - only allow certain status transitions
-      if (order.mpesaStatus === 'paid') {
-        console.log("Order already processed as paid:", order.id);
+      if (payment.status === 'completed') {
+        console.log("Payment already processed as completed:", payment.id);
         callbackProcessed = true;
         return res.json({ status: "OK", message: "Already processed" });
       }
@@ -904,6 +1223,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
             variance: variance
           });
           
+          // Update payment record to failed
+          await storage.updatePayment(payment.id, {
+            status: 'failed',
+            failureReason: 'Payment amount mismatch',
+            failureCode: 'AMOUNT_MISMATCH',
+            failedAt: new Date(),
+            mpesaReceiptNumber: callbackDetails.mpesaReceiptNumber || undefined,
+            gatewayResponse: req.body,
+          });
+
+          // Update order for backward compatibility
           await storage.updateOrderMpesaDetails(order.id, {
             mpesaStatus: 'failed',
             mpesaReceiptNumber: callbackDetails.mpesaReceiptNumber || undefined,
@@ -914,9 +1244,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Update order based on payment result
+      // Update payment record based on payment result
       if (callbackDetails.resultCode === 0) {
         // Payment successful
+        await storage.updatePayment(payment.id, {
+          status: 'completed',
+          receiptNumber: callbackDetails.mpesaReceiptNumber || undefined,
+          mpesaReceiptNumber: callbackDetails.mpesaReceiptNumber || undefined,
+          completedAt: callbackDetails.transactionDate || new Date(),
+          processedAt: new Date(),
+          gatewayResponse: req.body,
+        });
+
+        // Update order for backward compatibility
         await storage.updateOrderMpesaDetails(order.id, {
           mpesaStatus: 'paid',
           mpesaReceiptNumber: callbackDetails.mpesaReceiptNumber || undefined,
@@ -930,6 +1270,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       } else {
         // Payment failed
+        await storage.updatePayment(payment.id, {
+          status: 'failed',
+          failureReason: callbackDetails.resultDesc || 'Payment failed',
+          failureCode: callbackDetails.resultCode?.toString() || 'UNKNOWN',
+          failedAt: new Date(),
+          processedAt: new Date(),
+          gatewayResponse: req.body,
+        });
+
+        // Update order for backward compatibility
         await storage.updateOrderMpesaDetails(order.id, {
           mpesaStatus: 'failed',
         });
@@ -984,17 +1334,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/payments/mpesa/resend", async (req, res) => {
     try {
       const { orderId } = req.body;
-      const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
-
-      // Check rate limiting (stricter for resend)
-      const rateLimit = checkRateLimit(clientIp);
-      if (!rateLimit.allowed) {
-        const resetTime = new Date(rateLimit.resetTime);
-        return res.status(429).json({ 
-          error: "Too many payment attempts. Please wait before trying again.",
-          resetTime: resetTime.toISOString()
-        });
-      }
 
       if (!mpesaService.isConfigured()) {
         return res.status(500).json({ 
@@ -1037,13 +1376,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         transactionDesc: `Payment for KARY SCENTS order ${order.id.substring(0, 8)} (resend)`,
       });
 
-      // Update order with new Mpesa details
+      // Create new payment record for resend attempt
+      await storage.createPayment({
+        orderId: order.id,
+        paymentMethod: 'mpesa',
+        amount: order.total, // Keep in cents for consistency
+        currency: 'KES',
+        status: 'pending',
+        mpesaMerchantRequestId: stkResult.merchantRequestID,
+        mpesaCheckoutRequestId: stkResult.checkoutRequestID,
+        mpesaPhone: order.mpesaPhone,
+        initiatedAt: new Date(),
+        retryCount: (order.paymentRetryCount || 0) + 1,
+      });
+
+      // Update order with new Mpesa details and increment retry count
       await storage.updateOrderMpesaDetails(order.id, {
         mpesaMerchantRequestId: stkResult.merchantRequestID,
         mpesaCheckoutRequestId: stkResult.checkoutRequestID,
         mpesaStatus: 'initiated',
         paymentMethod: 'mpesa',
       });
+      
+      // Increment payment retry count
+      await storage.incrementPaymentRetryCount(order.id);
 
       console.log(`STK Push resent for order ${order.id}:`, {
         merchantRequestID: stkResult.merchantRequestID,
@@ -1056,7 +1412,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         checkoutRequestID: stkResult.checkoutRequestID,
         merchantRequestID: stkResult.merchantRequestID,
         customerMessage: stkResult.customerMessage,
-        remainingAttempts: rateLimit.remaining - 1,
       });
     } catch (error: any) {
       console.error("Error resending Mpesa payment:", error);
