@@ -81,7 +81,7 @@ export class MpesaService {
       }
     );
 
-    console.log(response)
+    console.log("boom" , response)
     if (!response.ok) {
       const error = await response.text();
       throw new Error(`Failed to get OAuth token: ${response.status} ${error}`);
@@ -190,6 +190,7 @@ export class MpesaService {
     
     try {
       accessToken = await this.getAccessToken();
+      console.log("tok",accessToken)
     } catch (error: any) {
       console.error('Failed to get OAuth token:', error.message);
       throw new Error('Failed to authenticate with M-Pesa. Please try again later.');
@@ -330,6 +331,7 @@ export class MpesaService {
       throw new Error(`STK Query failed: ${responseData.errorMessage || 'Unknown error'}`);
     }
 
+    console.log("xfactor" , responseData)
     return responseData;
   }
 

@@ -959,7 +959,7 @@ export default function CheckoutPage() {
                           type="button"
                           variant="outline"
                           size="sm"
-                          onClick={() => cancelPaymentMutation.mutate(currentOrderId)}
+                          onClick={() => cancelPaymentMutation.mutate(currentOrderId || "")}
                           disabled={cancelPaymentMutation.isPending}
                           data-testid="button-cancel-payment-timeout"
                         >
