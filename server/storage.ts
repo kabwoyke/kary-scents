@@ -13,16 +13,20 @@ import {
   type PaymentInitiation,
   type PaymentCompletion,
   type PaymentFailure,
+  type Payment,
+  type InsertPayment,
+  type UpdatePayment,
   type AdminSession,
   type InsertAdminSession,
   products,
   orders,
   orderItems,
   reviews,
+  payments,
   adminSessions
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, count, sum, gte, lt, avg, and } from "drizzle-orm";
+import { eq, desc, count, sum, gte, lt, avg, and, sql } from "drizzle-orm";
 
 export interface IStorage {
   // Products
@@ -67,6 +71,26 @@ export interface IStorage {
   getAllReviews(status?: string, limit?: number, offset?: number): Promise<{ reviews: Review[]; total: number }>;
   getProductAverageRating(productId: string): Promise<number>;
   
+  // Payments
+  createPayment(payment: InsertPayment): Promise<Payment>;
+  getPayment(id: string): Promise<Payment | undefined>;
+  getPaymentsByOrder(orderId: string): Promise<Payment[]>;
+  getPaymentByTransactionId(transactionId: string): Promise<Payment | undefined>;
+  getPaymentByMpesaCheckoutId(checkoutRequestId: string): Promise<Payment | undefined>;
+  updatePayment(id: string, updates: UpdatePayment): Promise<Payment | undefined>;
+  getAllPayments(limit?: number, offset?: number): Promise<{ payments: Payment[]; total: number }>;
+  getPaymentsByStatus(status: string, limit?: number, offset?: number): Promise<{ payments: Payment[]; total: number }>;
+  getPaymentsByMethod(method: 'stripe' | 'mpesa', limit?: number, offset?: number): Promise<{ payments: Payment[]; total: number }>;
+  getPaymentAnalytics(startDate?: Date, endDate?: Date): Promise<{
+    totalPayments: number;
+    successfulPayments: number;
+    failedPayments: number;
+    totalRevenue: number;
+    averageProcessingFee: number;
+    paymentMethodBreakdown: { stripe: number; mpesa: number; };
+    statusBreakdown: { [status: string]: number; };
+  }>;
+  
   // Mpesa Orders
   updateOrderMpesaDetails(id: string, updates: UpdateOrderMpesa): Promise<Order | undefined>;
   getOrderByCheckoutRequestId(checkoutRequestId: string): Promise<Order | undefined>;
@@ -79,17 +103,6 @@ export interface IStorage {
   getPaymentHistory(orderId: string): Promise<Order | undefined>;
   getOrdersByPaymentMethod(method: 'stripe' | 'mpesa', limit?: number): Promise<Order[]>;
   getFailedPayments(limit?: number): Promise<Order[]>;
-  getPaymentAnalytics(startDate?: Date, endDate?: Date): Promise<{
-    totalPayments: number;
-    successfulPayments: number;
-    failedPayments: number;
-    totalRevenue: number;
-    averageProcessingFee: number;
-    paymentMethodBreakdown: {
-      stripe: number;
-      mpesa: number;
-    };
-  }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -518,25 +531,117 @@ export class DatabaseStorage implements IStorage {
       .limit(limit);
   }
 
+  // Original payment analytics method removed - using new payments table version below
+
+  // Payments
+  async createPayment(payment: InsertPayment): Promise<Payment> {
+    const result = await db.insert(payments).values(payment).returning();
+    return result[0];
+  }
+
+  async getPayment(id: string): Promise<Payment | undefined> {
+    const result = await db.select().from(payments).where(eq(payments.id, id));
+    return result[0];
+  }
+
+  async getPaymentsByOrder(orderId: string): Promise<Payment[]> {
+    return await db.select().from(payments)
+      .where(eq(payments.orderId, orderId))
+      .orderBy(desc(payments.createdAt));
+  }
+
+  async getPaymentByTransactionId(transactionId: string): Promise<Payment | undefined> {
+    const result = await db.select().from(payments)
+      .where(eq(payments.transactionId, transactionId));
+    return result[0];
+  }
+
+  async getPaymentByMpesaCheckoutId(checkoutRequestId: string): Promise<Payment | undefined> {
+    const result = await db.select().from(payments)
+      .where(eq(payments.mpesaCheckoutRequestId, checkoutRequestId));
+    return result[0];
+  }
+
+  async updatePayment(id: string, updates: UpdatePayment): Promise<Payment | undefined> {
+    const result = await db
+      .update(payments)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(payments.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async getAllPayments(limit = 50, offset = 0): Promise<{ payments: Payment[]; total: number }> {
+    const [paymentsResult, totalResult] = await Promise.all([
+      db.select().from(payments)
+        .orderBy(desc(payments.createdAt))
+        .limit(limit)
+        .offset(offset),
+      db.select({ count: count() }).from(payments)
+    ]);
+
+    return {
+      payments: paymentsResult,
+      total: totalResult[0].count
+    };
+  }
+
+  async getPaymentsByStatus(status: string, limit = 50, offset = 0): Promise<{ payments: Payment[]; total: number }> {
+    const [paymentsResult, totalResult] = await Promise.all([
+      db.select().from(payments)
+        .where(eq(payments.status, status))
+        .orderBy(desc(payments.createdAt))
+        .limit(limit)
+        .offset(offset),
+      db.select({ count: count() }).from(payments)
+        .where(eq(payments.status, status))
+    ]);
+
+    return {
+      payments: paymentsResult,
+      total: totalResult[0].count
+    };
+  }
+
+  async getPaymentsByMethod(method: 'stripe' | 'mpesa', limit = 50, offset = 0): Promise<{ payments: Payment[]; total: number }> {
+    const [paymentsResult, totalResult] = await Promise.all([
+      db.select().from(payments)
+        .where(eq(payments.paymentMethod, method))
+        .orderBy(desc(payments.createdAt))
+        .limit(limit)
+        .offset(offset),
+      db.select({ count: count() }).from(payments)
+        .where(eq(payments.paymentMethod, method))
+    ]);
+
+    return {
+      payments: paymentsResult,
+      total: totalResult[0].count
+    };
+  }
+
   async getPaymentAnalytics(startDate?: Date, endDate?: Date): Promise<{
     totalPayments: number;
     successfulPayments: number;
     failedPayments: number;
     totalRevenue: number;
     averageProcessingFee: number;
-    paymentMethodBreakdown: {
-      stripe: number;
-      mpesa: number;
-    };
+    paymentMethodBreakdown: { stripe: number; mpesa: number; };
+    statusBreakdown: { [status: string]: number; };
   }> {
-    // Base query conditions
-    const dateConditions = [];
-    if (startDate) dateConditions.push(gte(orders.createdAt, startDate));
-    if (endDate) dateConditions.push(lt(orders.createdAt, endDate));
+    let whereCondition = sql`true`;
     
-    const whereCondition = dateConditions.length > 0 ? and(...dateConditions) : undefined;
+    if (startDate && endDate) {
+      whereCondition = and(
+        gte(payments.createdAt, startDate),
+        lt(payments.createdAt, endDate)
+      ) || sql`true`;
+    } else if (startDate) {
+      whereCondition = gte(payments.createdAt, startDate);
+    } else if (endDate) {
+      whereCondition = lt(payments.createdAt, endDate);
+    }
 
-    // Run parallel queries for analytics
     const [
       totalPaymentsResult,
       successfulPaymentsResult,
@@ -544,61 +649,77 @@ export class DatabaseStorage implements IStorage {
       revenueResult,
       avgFeeResult,
       stripeCountResult,
-      mpesaCountResult
+      mpesaCountResult,
+      statusBreakdownResult
     ] = await Promise.all([
-      // Total payments attempted
+      // Total payments
       db.select({ count: count() })
-        .from(orders)
+        .from(payments)
         .where(whereCondition),
       
       // Successful payments
       db.select({ count: count() })
-        .from(orders)
+        .from(payments)
         .where(and(
-          whereCondition || sql`true`,
-          sql`paidAt IS NOT NULL`
+          whereCondition,
+          eq(payments.status, 'completed')
         )),
       
       // Failed payments  
       db.select({ count: count() })
-        .from(orders)
+        .from(payments)
         .where(and(
-          whereCondition || sql`true`,
-          eq(orders.mpesaStatus, 'failed')
+          whereCondition,
+          eq(payments.status, 'failed')
         )),
       
       // Total revenue from successful payments
-      db.select({ total: sum(orders.total) })
-        .from(orders)
+      db.select({ total: sum(payments.amount) })
+        .from(payments)
         .where(and(
           whereCondition || sql`true`,
-          sql`paidAt IS NOT NULL`
+          eq(payments.status, 'completed')
         )),
       
       // Average processing fee
-      db.select({ avg: avg(orders.paymentProcessingFee) })
-        .from(orders)
+      db.select({ avg: avg(payments.processingFee) })
+        .from(payments)
         .where(and(
           whereCondition || sql`true`,
-          sql`paymentProcessingFee IS NOT NULL`
+          sql`processing_fee IS NOT NULL`
         )),
       
       // Stripe payments count
       db.select({ count: count() })
-        .from(orders)
+        .from(payments)
         .where(and(
           whereCondition || sql`true`,
-          eq(orders.paymentMethod, 'stripe')
+          eq(payments.paymentMethod, 'stripe')
         )),
       
       // M-Pesa payments count
       db.select({ count: count() })
-        .from(orders)
+        .from(payments)
         .where(and(
           whereCondition || sql`true`,
-          eq(orders.paymentMethod, 'mpesa')
-        ))
+          eq(payments.paymentMethod, 'mpesa')
+        )),
+
+      // Status breakdown
+      db.select({ 
+        status: payments.status, 
+        count: count() 
+      })
+        .from(payments)
+        .where(whereCondition)
+        .groupBy(payments.status)
     ]);
+
+    // Convert status breakdown to object
+    const statusBreakdown: { [status: string]: number } = {};
+    statusBreakdownResult.forEach(item => {
+      statusBreakdown[item.status] = item.count;
+    });
 
     return {
       totalPayments: totalPaymentsResult[0].count,
@@ -609,7 +730,8 @@ export class DatabaseStorage implements IStorage {
       paymentMethodBreakdown: {
         stripe: stripeCountResult[0].count,
         mpesa: mpesaCountResult[0].count,
-      }
+      },
+      statusBreakdown
     };
   }
 }

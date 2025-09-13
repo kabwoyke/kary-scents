@@ -390,7 +390,7 @@ export default function CheckoutPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ amount: data.amount }),
+        body: JSON.stringify({ amount: data.amount, orderId: data.orderId }),
       });
       if (!response.ok) {
         throw new Error("Failed to create payment intent");

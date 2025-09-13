@@ -18,6 +18,7 @@ import AdminDashboardPage from "@/pages/admin/DashboardPage";
 import AdminProductsPage from "@/pages/admin/ProductsPage";
 import AdminOrdersPage from "@/pages/admin/OrdersPage";
 import AdminReviewsPage from "@/pages/admin/ReviewsPage";
+import AdminPaymentsPage from "@/pages/admin/PaymentsPage";
 
 function Router() {
   return (
@@ -28,6 +29,7 @@ function Router() {
       <Route path="/admin/products" component={AdminProductsPage} />
       <Route path="/admin/orders" component={AdminOrdersPage} />
       <Route path="/admin/reviews" component={AdminReviewsPage} />
+      <Route path="/admin/payments" component={AdminPaymentsPage} />
       
       {/* Public Routes */}
       <Route path="/" component={HomePage} />

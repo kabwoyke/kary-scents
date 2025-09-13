@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, decimal, timestamp, boolean, index, json } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, decimal, timestamp, boolean, index, json, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -90,6 +90,64 @@ export const adminSessions = pgTable("admin_sessions", {
   expiresAt: timestamp("expires_at").notNull(),
 });
 
+// Payments table - Dedicated table for tracking all payment transactions
+export const payments = pgTable("payments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderId: varchar("order_id").notNull().references(() => orders.id, { onDelete: "cascade" }),
+  
+  // Core payment information
+  paymentMethod: text("payment_method").notNull(), // 'stripe' | 'mpesa'
+  amount: integer("amount").notNull(), // Amount in cents
+  currency: text("currency").notNull().default("KES"),
+  status: text("status").notNull().default("pending"), // 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'refunded'
+  
+  // Transaction identifiers
+  transactionId: text("transaction_id"), // Stripe payment intent ID or M-Pesa transaction ID
+  receiptNumber: text("receipt_number"), // M-Pesa receipt number or Stripe charge ID
+  
+  // Payment gateway specific fields
+  gatewayResponse: json("gateway_response"), // Full response from payment gateway
+  processingFee: integer("processing_fee"), // Gateway processing fees in cents
+  
+  // Stripe specific fields
+  stripePaymentIntentId: text("stripe_payment_intent_id"),
+  stripeChargeId: text("stripe_charge_id"),
+  
+  // M-Pesa specific fields
+  mpesaMerchantRequestId: text("mpesa_merchant_request_id"),
+  mpesaCheckoutRequestId: text("mpesa_checkout_request_id"),
+  mpesaReceiptNumber: text("mpesa_receipt_number"),
+  mpesaPhone: text("mpesa_phone"), // E.164 normalized phone
+  
+  // Payment lifecycle tracking
+  initiatedAt: timestamp("initiated_at"), // When payment process started
+  processedAt: timestamp("processed_at"), // When payment was processed by gateway
+  completedAt: timestamp("completed_at"), // When payment was confirmed completed
+  failedAt: timestamp("failed_at"), // When payment failed
+  
+  // Error tracking
+  failureReason: text("failure_reason"), // Human readable failure reason
+  failureCode: text("failure_code"), // Gateway specific failure code
+  retryCount: integer("retry_count").default(0), // Number of retry attempts
+  
+  // Audit fields
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => {
+  return {
+    orderIdIdx: index("payments_order_id_idx").on(table.orderId),
+    statusIdx: index("payments_status_idx").on(table.status),
+    paymentMethodIdx: index("payments_method_idx").on(table.paymentMethod),
+    transactionIdIdx: index("payments_transaction_id_idx").on(table.transactionId),
+    mpesaCheckoutIdx: index("payments_mpesa_checkout_idx").on(table.mpesaCheckoutRequestId),
+    createdAtIdx: index("payments_created_at_idx").on(table.createdAt),
+    // Unique constraints for idempotency
+    transactionIdUnique: unique("payments_transaction_id_unique").on(table.transactionId),
+    mpesaCheckoutUnique: unique("payments_mpesa_checkout_unique").on(table.mpesaCheckoutRequestId),
+    stripePaymentIntentUnique: unique("payments_stripe_pi_unique").on(table.stripePaymentIntentId),
+  };
+});
+
 // Zod schemas
 export const insertProductSchema = createInsertSchema(products).omit({
   id: true,
@@ -119,6 +177,33 @@ export const insertReviewSchema = createInsertSchema(reviews).omit({
   id: true,
   status: true,
   createdAt: true,
+});
+
+export const insertPaymentSchema = createInsertSchema(payments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const updatePaymentSchema = z.object({
+  status: z.enum(["pending", "processing", "completed", "failed", "cancelled", "refunded"]).optional(),
+  transactionId: z.string().optional(),
+  receiptNumber: z.string().optional(),
+  gatewayResponse: z.any().optional(),
+  processingFee: z.number().optional(),
+  stripePaymentIntentId: z.string().optional(),
+  stripeChargeId: z.string().optional(),
+  mpesaMerchantRequestId: z.string().optional(),
+  mpesaCheckoutRequestId: z.string().optional(),
+  mpesaReceiptNumber: z.string().optional(),
+  mpesaPhone: z.string().optional(),
+  initiatedAt: z.date().optional(),
+  processedAt: z.date().optional(),
+  completedAt: z.date().optional(),
+  failedAt: z.date().optional(),
+  failureReason: z.string().optional(),
+  failureCode: z.string().optional(),
+  retryCount: z.number().optional(),
 });
 
 // Admin schemas
@@ -217,6 +302,9 @@ export type OrderItem = typeof orderItems.$inferSelect;
 export type InsertOrderItem = z.infer<typeof insertOrderItemSchema>;
 export type Review = typeof reviews.$inferSelect;
 export type InsertReview = z.infer<typeof insertReviewSchema>;
+export type Payment = typeof payments.$inferSelect;
+export type InsertPayment = z.infer<typeof insertPaymentSchema>;
+export type UpdatePayment = z.infer<typeof updatePaymentSchema>;
 export type AdminSession = typeof adminSessions.$inferSelect;
 export type InsertAdminSession = z.infer<typeof insertAdminSessionSchema>;
 export type AdminLoginData = z.infer<typeof adminLoginSchema>;
