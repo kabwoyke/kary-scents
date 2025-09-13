@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, decimal, timestamp, boolean, index } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, decimal, timestamp, boolean, index, json } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -29,15 +29,27 @@ export const orders = pgTable("orders", {
   subtotal: integer("subtotal").notNull(),
   total: integer("total").notNull(),
   status: text("status").notNull().default("pending"), // pending, processing, shipped, delivered
-  stripePaymentIntentId: text("stripe_payment_intent_id"),
-  // Mpesa payment fields
+  
+  // Enhanced payment tracking fields
   paymentMethod: text("payment_method"), // 'stripe' | 'mpesa'
-  paidAt: timestamp("paid_at"),
+  currency: text("currency").notNull().default("KES"), // Explicit currency tracking
+  paymentInitiatedAt: timestamp("payment_initiated_at"), // When payment process started
+  paidAt: timestamp("paid_at"), // When payment was completed
+  paymentFailureReason: text("payment_failure_reason"), // Detailed failure reasons
+  paymentRetryCount: integer("payment_retry_count").default(0), // Number of payment attempts
+  paymentProcessingFee: integer("payment_processing_fee"), // Gateway fees in cents
+  paymentGatewayResponse: json("payment_gateway_response"), // Full gateway response for audit
+  
+  // Stripe payment fields
+  stripePaymentIntentId: text("stripe_payment_intent_id"),
+  
+  // M-Pesa payment fields
   mpesaMerchantRequestId: text("mpesa_merchant_request_id"),
   mpesaCheckoutRequestId: text("mpesa_checkout_request_id"),
   mpesaReceiptNumber: text("mpesa_receipt_number"),
   mpesaStatus: text("mpesa_status"), // 'initiated' | 'pending' | 'paid' | 'failed'
   mpesaPhone: text("mpesa_phone"), // E.164 normalized phone
+  
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -92,6 +104,11 @@ export const insertOrderSchema = createInsertSchema(orders).omit({
   status: true,
   stripePaymentIntentId: true,
   paidAt: true,
+  paymentInitiatedAt: true,
+  paymentFailureReason: true,
+  paymentRetryCount: true,
+  paymentProcessingFee: true,
+  paymentGatewayResponse: true,
 });
 
 export const insertOrderItemSchema = createInsertSchema(orderItems).omit({
@@ -130,6 +147,67 @@ export const updateOrderMpesaSchema = z.object({
   paidAt: z.date().optional(),
 });
 
+// Stripe payment confirmation schema
+export const stripeConfirmPaymentSchema = z.object({
+  orderId: z.string().min(1, "Order ID is required"),
+  paymentIntentId: z.string().min(1, "Payment Intent ID is required"),
+});
+
+// Enhanced payment update schema with comprehensive payment tracking
+export const updateOrderPaymentSchema = z.object({
+  // Core payment fields
+  paymentMethod: z.enum(["stripe", "mpesa"]).optional(),
+  currency: z.string().optional(),
+  paymentInitiatedAt: z.date().optional(),
+  paidAt: z.date().optional(),
+  paymentFailureReason: z.string().optional(),
+  paymentRetryCount: z.number().optional(),
+  paymentProcessingFee: z.number().optional(),
+  paymentGatewayResponse: z.any().optional(), // JSON object
+  
+  // Stripe specific fields
+  stripePaymentIntentId: z.string().optional(),
+  
+  // M-Pesa specific fields
+  mpesaMerchantRequestId: z.string().optional(),
+  mpesaCheckoutRequestId: z.string().optional(),
+  mpesaReceiptNumber: z.string().optional(),
+  mpesaStatus: z.enum(["initiated", "pending", "paid", "failed"]).optional(),
+  mpesaPhone: z.string().optional(),
+});
+
+// Payment initiation schema for recording when payment process starts
+export const paymentInitiationSchema = z.object({
+  orderId: z.string(),
+  paymentMethod: z.enum(["stripe", "mpesa"]),
+  currency: z.string().default("KES"),
+  initiatedAt: z.date().default(() => new Date()),
+  retryCount: z.number().default(0),
+});
+
+// Payment completion schema for successful payments
+export const paymentCompletionSchema = z.object({
+  orderId: z.string(),
+  paymentMethod: z.enum(["stripe", "mpesa"]),
+  transactionId: z.string(), // Receipt number or payment intent ID
+  amount: z.number(), // Amount paid in cents
+  currency: z.string(),
+  completedAt: z.date(),
+  processingFee: z.number().optional(),
+  gatewayResponse: z.any().optional(),
+});
+
+// Payment failure schema for failed payments
+export const paymentFailureSchema = z.object({
+  orderId: z.string(),
+  paymentMethod: z.enum(["stripe", "mpesa"]),
+  failureReason: z.string(),
+  failureCode: z.string().optional(),
+  failedAt: z.date().default(() => new Date()),
+  retryCount: z.number(),
+  gatewayResponse: z.any().optional(),
+});
+
 // Types
 export type Product = typeof products.$inferSelect;
 export type InsertProduct = z.infer<typeof insertProductSchema>;
@@ -144,3 +222,10 @@ export type InsertAdminSession = z.infer<typeof insertAdminSessionSchema>;
 export type AdminLoginData = z.infer<typeof adminLoginSchema>;
 export type UpdateReviewStatus = z.infer<typeof updateReviewStatusSchema>;
 export type UpdateOrderMpesa = z.infer<typeof updateOrderMpesaSchema>;
+export type StripeConfirmPayment = z.infer<typeof stripeConfirmPaymentSchema>;
+export type UpdateOrderPayment = z.infer<typeof updateOrderPaymentSchema>;
+
+// Enhanced payment tracking types
+export type PaymentInitiation = z.infer<typeof paymentInitiationSchema>;
+export type PaymentCompletion = z.infer<typeof paymentCompletionSchema>;
+export type PaymentFailure = z.infer<typeof paymentFailureSchema>;
