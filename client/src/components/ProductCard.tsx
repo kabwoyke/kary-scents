@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useState } from "react";
+import { Link } from "wouter";
 import { ReviewListCompact } from "@/components/ReviewList";
 
 export interface Product {
@@ -21,14 +22,12 @@ interface ProductCardProps {
   product: Product;
   onAddToCart?: (product: Product) => void;
   onToggleFavorite?: (productId: string) => void;
-  onViewDetails?: (product: Product) => void;
 }
 
 export default function ProductCard({ 
   product, 
   onAddToCart, 
-  onToggleFavorite,
-  onViewDetails 
+  onToggleFavorite 
 }: ProductCardProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [isFavorited, setIsFavorited] = useState(product.isFavorite || false);
@@ -48,10 +47,6 @@ export default function ProductCard({
     setIsFavorited(!isFavorited);
     onToggleFavorite?.(product.id);
     console.log('Toggled favorite:', product.name);
-  };
-
-  const handleViewDetails = () => {
-    onViewDetails?.(product);
   };
 
   const discount = product.originalPrice 
@@ -130,16 +125,17 @@ export default function ProductCard({
         </div>
 
         <div className="flex gap-2 w-full">
-          <Button 
-            variant="outline"
-            size="sm"
-            onClick={handleViewDetails}
-            className="flex-1 hover-elevate"
-            data-testid={`button-view-details-${product.id}`}
-          >
-            <Eye className="h-4 w-4 mr-1" />
-            Details
-          </Button>
+          <Link href={`/product/${product.id}`}>
+            <Button 
+              variant="outline"
+              size="sm"
+              className="flex-1 hover-elevate"
+              data-testid={`button-view-details-${product.id}`}
+            >
+              <Eye className="h-4 w-4 mr-1" />
+              Details
+            </Button>
+          </Link>
           
           <Button 
             size="sm"

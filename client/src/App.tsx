@@ -8,6 +8,7 @@ import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import HomePage from "@/pages/HomePage";
 import ShopPage from "@/pages/ShopPage";
+import ProductDetailPage from "@/pages/ProductDetailPage";
 import CartPage from "@/pages/CartPage";
 import CheckoutPage from "@/pages/CheckoutPage";
 import ContactPage from "@/pages/ContactPage";
@@ -31,6 +32,7 @@ function Router() {
       {/* Public Routes */}
       <Route path="/" component={HomePage} />
       <Route path="/shop" component={ShopPage} />
+      <Route path="/product/:id" component={ProductDetailPage} />
       <Route path="/cart" component={CartPage} />
       <Route path="/checkout" component={CheckoutPage} />
       <Route path="/contact" component={ContactPage} />
