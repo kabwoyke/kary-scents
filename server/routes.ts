@@ -1,11 +1,12 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProductSchema, insertOrderSchema, adminLoginSchema, insertReviewSchema, updateReviewStatusSchema } from "@shared/schema";
+import { insertProductSchema, insertOrderSchema, adminLoginSchema, stripeConfirmPaymentSchema , insertReviewSchema, updateReviewStatusSchema } from "@shared/schema";
 import { z } from "zod";
 import Stripe from "stripe";
 import crypto from "crypto";
 import { mpesaService } from "./mpesa";
+import { sendOrderReceiptEmail } from "./email";
 
 // Simple in-memory rate limiting for review submissions
 interface RateLimitEntry {

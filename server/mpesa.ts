@@ -81,6 +81,7 @@ export class MpesaService {
       }
     );
 
+    console.log(response)
     if (!response.ok) {
       const error = await response.text();
       throw new Error(`Failed to get OAuth token: ${response.status} ${error}`);

@@ -293,6 +293,8 @@ export const paymentFailureSchema = z.object({
   gatewayResponse: z.any().optional(),
 });
 
+
+
 // Types
 export type Product = typeof products.$inferSelect;
 export type InsertProduct = z.infer<typeof insertProductSchema>;
