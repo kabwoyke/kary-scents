@@ -5,6 +5,7 @@ import { insertProductSchema, insertOrderSchema, adminLoginSchema } from "@share
 import { z } from "zod";
 import Stripe from "stripe";
 import crypto from "crypto";
+import { mpesaService } from "./mpesa";
 
 // Initialize Stripe - will handle missing key in payment endpoints
 let stripe: Stripe | null = null;
@@ -389,6 +390,409 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching order:", error);
       res.status(500).json({ error: "Failed to fetch order" });
+    }
+  });
+
+  // Rate limiting for payment initiation (in-memory store for simplicity)
+  const paymentAttempts = new Map<string, { count: number; resetTime: number }>();
+  const PAYMENT_RATE_LIMIT = 3; // Max 3 attempts per 10 minutes per IP
+  const PAYMENT_RATE_WINDOW = 10 * 60 * 1000; // 10 minutes
+
+  function checkRateLimit(ip: string): { allowed: boolean; remaining: number; resetTime: number } {
+    const now = Date.now();
+    const attempts = paymentAttempts.get(ip) || { count: 0, resetTime: now + PAYMENT_RATE_WINDOW };
+    
+    // Reset if window expired
+    if (now > attempts.resetTime) {
+      attempts.count = 0;
+      attempts.resetTime = now + PAYMENT_RATE_WINDOW;
+    }
+    
+    if (attempts.count >= PAYMENT_RATE_LIMIT) {
+      return { allowed: false, remaining: 0, resetTime: attempts.resetTime };
+    }
+    
+    attempts.count++;
+    paymentAttempts.set(ip, attempts);
+    
+    return { 
+      allowed: true, 
+      remaining: PAYMENT_RATE_LIMIT - attempts.count, 
+      resetTime: attempts.resetTime 
+    };
+  }
+
+  // Mpesa Payment Routes
+  app.post("/api/payments/mpesa/initiate", async (req, res) => {
+    try {
+      const { orderId, phone } = req.body;
+      const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
+
+      // Check rate limiting
+      const rateLimit = checkRateLimit(clientIp);
+      if (!rateLimit.allowed) {
+        const resetTime = new Date(rateLimit.resetTime);
+        return res.status(429).json({ 
+          error: "Too many payment attempts. Please try again later.",
+          resetTime: resetTime.toISOString(),
+          remainingAttempts: 0
+        });
+      }
+
+      if (!mpesaService.isConfigured()) {
+        return res.status(500).json({ 
+          error: "Mpesa payment is not configured. Please contact support." 
+        });
+      }
+
+      // Validate input
+      if (!orderId || !phone) {
+        return res.status(400).json({ 
+          error: "Order ID and phone number are required" 
+        });
+      }
+
+      // Get order details
+      const order = await storage.getOrder(orderId);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+
+      // Check if order can be paid
+      if (order.status === 'delivered') {
+        return res.status(400).json({ error: "Cannot pay for delivered order" });
+      }
+
+      if (order.mpesaStatus === 'paid') {
+        return res.status(400).json({ error: "Order has already been paid" });
+      }
+
+      // Normalize phone number
+      let normalizedPhone: string;
+      try {
+        normalizedPhone = mpesaService.normalizePhoneNumber(phone);
+      } catch (error: any) {
+        return res.status(400).json({ error: error.message });
+      }
+
+      // Convert amount from cents to KES for Mpesa
+      const amount = order.total / 100;
+
+      // Initiate STK Push
+      const stkResult = await mpesaService.initiateSTKPush({
+        phone: normalizedPhone,
+        amount,
+        orderId: order.id,
+        accountReference: `KARY-${order.id.substring(0, 8)}`,
+        transactionDesc: `Payment for KARY SCENTS order ${order.id.substring(0, 8)}`,
+      });
+
+      // Update order with Mpesa details
+      await storage.updateOrderMpesaDetails(order.id, {
+        mpesaMerchantRequestId: stkResult.merchantRequestID,
+        mpesaCheckoutRequestId: stkResult.checkoutRequestID,
+        mpesaStatus: 'initiated',
+        mpesaPhone: normalizedPhone,
+        paymentMethod: 'mpesa',
+      });
+
+      console.log(`STK Push initiated for order ${order.id}:`, {
+        merchantRequestID: stkResult.merchantRequestID,
+        checkoutRequestID: stkResult.checkoutRequestID,
+        customerMessage: stkResult.customerMessage,
+      });
+
+      res.json({
+        success: true,
+        checkoutRequestID: stkResult.checkoutRequestID,
+        merchantRequestID: stkResult.merchantRequestID,
+        customerMessage: stkResult.customerMessage,
+      });
+    } catch (error: any) {
+      console.error("Error initiating Mpesa payment:", error);
+      res.status(500).json({ 
+        error: "Failed to initiate payment", 
+        details: error.message 
+      });
+    }
+  });
+
+  app.post("/api/payments/mpesa/callback", async (req, res) => {
+    const startTime = Date.now();
+    let orderFound = false;
+    let callbackProcessed = false;
+    
+    try {
+      console.log("Mpesa callback received:", JSON.stringify(req.body, null, 2));
+
+      // Extract auth token from headers
+      const authToken = req.headers['x-mpesa-auth-token'] as string;
+
+      // Validate callback structure and authentication
+      if (!mpesaService.validateCallback(req.body, authToken)) {
+        console.error("Invalid callback structure or authentication:", {
+          body: req.body,
+          hasAuth: !!authToken,
+          headers: req.headers
+        });
+        return res.status(400).json({ error: "Invalid callback structure or authentication" });
+      }
+
+      // Extract callback details
+      const callbackDetails = mpesaService.extractCallbackDetails(req.body);
+      
+      // Store raw callback for audit
+      console.log("Callback details extracted:", {
+        checkoutRequestID: callbackDetails.checkoutRequestID,
+        resultCode: callbackDetails.resultCode,
+        resultDesc: callbackDetails.resultDesc,
+        amount: callbackDetails.amount,
+        receipt: callbackDetails.mpesaReceiptNumber
+      });
+
+      // Find order by CheckoutRequestID
+      const order = await storage.getOrderByCheckoutRequestId(
+        callbackDetails.checkoutRequestID
+      );
+
+      if (!order) {
+        console.error("Order not found for CheckoutRequestID:", callbackDetails.checkoutRequestID);
+        return res.status(404).json({ error: "Order not found" });
+      }
+      
+      orderFound = true;
+
+      // Idempotent processing - only allow certain status transitions
+      if (order.mpesaStatus === 'paid') {
+        console.log("Order already processed as paid:", order.id);
+        callbackProcessed = true;
+        return res.json({ status: "OK", message: "Already processed" });
+      }
+
+      if (order.mpesaStatus === 'failed' && callbackDetails.resultCode === 0) {
+        console.warn("Attempting to mark failed payment as successful:", {
+          orderId: order.id,
+          currentStatus: order.mpesaStatus,
+          resultCode: callbackDetails.resultCode
+        });
+      }
+
+      // Validate payment amount matches order total (allow small variance for rounding)
+      if (callbackDetails.resultCode === 0 && callbackDetails.amount) {
+        const expectedAmount = order.total / 100; // Convert cents to KSh
+        const actualAmount = callbackDetails.amount;
+        const variance = Math.abs(expectedAmount - actualAmount);
+        
+        if (variance > 1) {
+          console.error("Payment amount mismatch:", {
+            orderId: order.id,
+            expected: expectedAmount,
+            actual: actualAmount,
+            variance: variance
+          });
+          
+          await storage.updateOrderMpesaDetails(order.id, {
+            mpesaStatus: 'failed',
+            mpesaReceiptNumber: callbackDetails.mpesaReceiptNumber || undefined,
+          });
+          
+          callbackProcessed = true;
+          return res.json({ status: "OK", message: "Amount mismatch - marked as failed" });
+        }
+      }
+
+      // Update order based on payment result
+      if (callbackDetails.resultCode === 0) {
+        // Payment successful
+        await storage.updateOrderMpesaDetails(order.id, {
+          mpesaStatus: 'paid',
+          mpesaReceiptNumber: callbackDetails.mpesaReceiptNumber || undefined,
+          paidAt: callbackDetails.transactionDate || new Date(),
+        });
+
+        console.log(`Payment successful for order ${order.id}:`, {
+          receipt: callbackDetails.mpesaReceiptNumber,
+          amount: callbackDetails.amount,
+          expectedAmount: order.total / 100
+        });
+      } else {
+        // Payment failed
+        await storage.updateOrderMpesaDetails(order.id, {
+          mpesaStatus: 'failed',
+        });
+
+        console.log(`Payment failed for order ${order.id}:`, {
+          resultCode: callbackDetails.resultCode,
+          resultDesc: callbackDetails.resultDesc,
+        });
+      }
+
+      callbackProcessed = true;
+      
+      // Always respond with 200 to Safaricom
+      res.json({ status: "OK" });
+    } catch (error: any) {
+      console.error("Error processing Mpesa callback:", {
+        error: error.message,
+        stack: error.stack,
+        orderFound,
+        callbackProcessed,
+        processingTime: Date.now() - startTime
+      });
+      
+      // Still respond with 200 to prevent Safaricom retries
+      res.json({ status: "ERROR", message: error.message });
+    }
+  });
+
+  app.get("/api/orders/:id/payment-status", async (req, res) => {
+    try {
+      const order = await storage.getOrder(req.params.id);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+
+      res.json({
+        orderId: order.id,
+        status: order.status,
+        paymentMethod: order.paymentMethod,
+        mpesaStatus: order.mpesaStatus,
+        paidAt: order.paidAt,
+        mpesaReceiptNumber: order.mpesaReceiptNumber,
+        total: order.total / 100, // Convert back to KSh
+      });
+    } catch (error: any) {
+      console.error("Error fetching payment status:", error);
+      res.status(500).json({ error: "Failed to fetch payment status" });
+    }
+  });
+
+  // Resend STK Push
+  app.post("/api/payments/mpesa/resend", async (req, res) => {
+    try {
+      const { orderId } = req.body;
+      const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
+
+      // Check rate limiting (stricter for resend)
+      const rateLimit = checkRateLimit(clientIp);
+      if (!rateLimit.allowed) {
+        const resetTime = new Date(rateLimit.resetTime);
+        return res.status(429).json({ 
+          error: "Too many payment attempts. Please wait before trying again.",
+          resetTime: resetTime.toISOString()
+        });
+      }
+
+      if (!mpesaService.isConfigured()) {
+        return res.status(500).json({ 
+          error: "Mpesa payment is not configured. Please contact support." 
+        });
+      }
+
+      if (!orderId) {
+        return res.status(400).json({ error: "Order ID is required" });
+      }
+
+      // Get order details
+      const order = await storage.getOrder(orderId);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+
+      // Only allow resend for failed or initiated status
+      if (!['failed', 'initiated'].includes(order.mpesaStatus || '')) {
+        return res.status(400).json({ 
+          error: `Cannot resend payment for order with status: ${order.mpesaStatus}` 
+        });
+      }
+
+      if (!order.mpesaPhone) {
+        return res.status(400).json({ 
+          error: "No phone number found for this order. Please initiate payment first." 
+        });
+      }
+
+      // Convert amount from cents to KES for Mpesa
+      const amount = order.total / 100;
+
+      // Initiate STK Push
+      const stkResult = await mpesaService.initiateSTKPush({
+        phone: order.mpesaPhone,
+        amount,
+        orderId: order.id,
+        accountReference: `KARY-${order.id.substring(0, 8)}`,
+        transactionDesc: `Payment for KARY SCENTS order ${order.id.substring(0, 8)} (resend)`,
+      });
+
+      // Update order with new Mpesa details
+      await storage.updateOrderMpesaDetails(order.id, {
+        mpesaMerchantRequestId: stkResult.merchantRequestID,
+        mpesaCheckoutRequestId: stkResult.checkoutRequestID,
+        mpesaStatus: 'initiated',
+        paymentMethod: 'mpesa',
+      });
+
+      console.log(`STK Push resent for order ${order.id}:`, {
+        merchantRequestID: stkResult.merchantRequestID,
+        checkoutRequestID: stkResult.checkoutRequestID,
+        customerMessage: stkResult.customerMessage,
+      });
+
+      res.json({
+        success: true,
+        checkoutRequestID: stkResult.checkoutRequestID,
+        merchantRequestID: stkResult.merchantRequestID,
+        customerMessage: stkResult.customerMessage,
+        remainingAttempts: rateLimit.remaining - 1,
+      });
+    } catch (error: any) {
+      console.error("Error resending Mpesa payment:", error);
+      res.status(500).json({ 
+        error: "Failed to resend payment", 
+        details: error.message 
+      });
+    }
+  });
+
+  // Cancel payment
+  app.post("/api/payments/mpesa/cancel", async (req, res) => {
+    try {
+      const { orderId } = req.body;
+
+      if (!orderId) {
+        return res.status(400).json({ error: "Order ID is required" });
+      }
+
+      // Get order details
+      const order = await storage.getOrder(orderId);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+
+      // Only allow cancellation of initiated/failed payments
+      if (!['initiated', 'failed'].includes(order.mpesaStatus || '')) {
+        return res.status(400).json({ 
+          error: `Cannot cancel payment for order with status: ${order.mpesaStatus}` 
+        });
+      }
+
+      // Mark payment as cancelled
+      await storage.updateOrderMpesaDetails(order.id, {
+        mpesaStatus: 'failed',
+      });
+
+      console.log(`Payment cancelled for order ${order.id}`);
+
+      res.json({
+        success: true,
+        message: "Payment cancelled successfully"
+      });
+    } catch (error: any) {
+      console.error("Error cancelling Mpesa payment:", error);
+      res.status(500).json({ 
+        error: "Failed to cancel payment", 
+        details: error.message 
+      });
     }
   });
 
