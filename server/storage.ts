@@ -10,6 +10,9 @@ import {
   type UpdateReviewStatus,
   type UpdateOrderMpesa,
   type UpdateOrderPayment,
+  type PaymentInitiation,
+  type PaymentCompletion,
+  type PaymentFailure,
   type AdminSession,
   type InsertAdminSession,
   products,
@@ -67,6 +70,26 @@ export interface IStorage {
   // Mpesa Orders
   updateOrderMpesaDetails(id: string, updates: UpdateOrderMpesa): Promise<Order | undefined>;
   getOrderByCheckoutRequestId(checkoutRequestId: string): Promise<Order | undefined>;
+  
+  // Enhanced Payment Tracking
+  recordPaymentInitiation(orderId: string, data: PaymentInitiation): Promise<Order | undefined>;
+  recordPaymentCompletion(orderId: string, data: PaymentCompletion): Promise<Order | undefined>;
+  recordPaymentFailure(orderId: string, data: PaymentFailure): Promise<Order | undefined>;
+  incrementPaymentRetryCount(orderId: string): Promise<Order | undefined>;
+  getPaymentHistory(orderId: string): Promise<Order | undefined>;
+  getOrdersByPaymentMethod(method: 'stripe' | 'mpesa', limit?: number): Promise<Order[]>;
+  getFailedPayments(limit?: number): Promise<Order[]>;
+  getPaymentAnalytics(startDate?: Date, endDate?: Date): Promise<{
+    totalPayments: number;
+    successfulPayments: number;
+    failedPayments: number;
+    totalRevenue: number;
+    averageProcessingFee: number;
+    paymentMethodBreakdown: {
+      stripe: number;
+      mpesa: number;
+    };
+  }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -362,6 +385,232 @@ export class DatabaseStorage implements IStorage {
       .from(orders)
       .where(eq(orders.mpesaCheckoutRequestId, checkoutRequestId));
     return result[0];
+  }
+
+  // Enhanced Payment Tracking Methods
+  async recordPaymentInitiation(orderId: string, data: PaymentInitiation): Promise<Order | undefined> {
+    const updateData: Partial<UpdateOrderPayment> = {
+      paymentMethod: data.paymentMethod,
+      currency: data.currency,
+      paymentInitiatedAt: data.initiatedAt,
+      paymentRetryCount: data.retryCount,
+    };
+
+    const result = await db
+      .update(orders)
+      .set({ ...updateData, updatedAt: new Date() })
+      .where(eq(orders.id, orderId))
+      .returning();
+    
+    console.log(`Payment initiation recorded for order ${orderId}:`, {
+      method: data.paymentMethod,
+      currency: data.currency,
+      retryCount: data.retryCount
+    });
+    
+    return result[0];
+  }
+
+  async recordPaymentCompletion(orderId: string, data: PaymentCompletion): Promise<Order | undefined> {
+    const updateData: Partial<UpdateOrderPayment> = {
+      paymentMethod: data.paymentMethod,
+      paidAt: data.completedAt,
+      paymentProcessingFee: data.processingFee,
+      paymentGatewayResponse: data.gatewayResponse,
+    };
+
+    // Set method-specific transaction ID
+    if (data.paymentMethod === 'stripe') {
+      updateData.stripePaymentIntentId = data.transactionId;
+    } else if (data.paymentMethod === 'mpesa') {
+      updateData.mpesaReceiptNumber = data.transactionId;
+      updateData.mpesaStatus = 'paid';
+    }
+
+    const result = await db
+      .update(orders)
+      .set({ ...updateData, updatedAt: new Date() })
+      .where(eq(orders.id, orderId))
+      .returning();
+    
+    console.log(`Payment completion recorded for order ${orderId}:`, {
+      method: data.paymentMethod,
+      transactionId: data.transactionId,
+      amount: data.amount,
+      fee: data.processingFee
+    });
+    
+    return result[0];
+  }
+
+  async recordPaymentFailure(orderId: string, data: PaymentFailure): Promise<Order | undefined> {
+    const updateData: Partial<UpdateOrderPayment> = {
+      paymentMethod: data.paymentMethod,
+      paymentFailureReason: data.failureReason,
+      paymentRetryCount: data.retryCount,
+      paymentGatewayResponse: data.gatewayResponse,
+    };
+
+    // Set method-specific failure status
+    if (data.paymentMethod === 'mpesa') {
+      updateData.mpesaStatus = 'failed';
+    }
+
+    const result = await db
+      .update(orders)
+      .set({ ...updateData, updatedAt: new Date() })
+      .where(eq(orders.id, orderId))
+      .returning();
+    
+    console.log(`Payment failure recorded for order ${orderId}:`, {
+      method: data.paymentMethod,
+      reason: data.failureReason,
+      retryCount: data.retryCount
+    });
+    
+    return result[0];
+  }
+
+  async incrementPaymentRetryCount(orderId: string): Promise<Order | undefined> {
+    // Get current retry count
+    const currentOrder = await this.getOrder(orderId);
+    if (!currentOrder) return undefined;
+
+    const newRetryCount = (currentOrder.paymentRetryCount || 0) + 1;
+    
+    const result = await db
+      .update(orders)
+      .set({ 
+        paymentRetryCount: newRetryCount,
+        updatedAt: new Date() 
+      })
+      .where(eq(orders.id, orderId))
+      .returning();
+    
+    console.log(`Payment retry count incremented for order ${orderId}: ${newRetryCount}`);
+    
+    return result[0];
+  }
+
+  async getPaymentHistory(orderId: string): Promise<Order | undefined> {
+    const result = await db
+      .select()
+      .from(orders)
+      .where(eq(orders.id, orderId));
+    return result[0];
+  }
+
+  async getOrdersByPaymentMethod(method: 'stripe' | 'mpesa', limit: number = 50): Promise<Order[]> {
+    return await db
+      .select()
+      .from(orders)
+      .where(eq(orders.paymentMethod, method))
+      .orderBy(desc(orders.createdAt))
+      .limit(limit);
+  }
+
+  async getFailedPayments(limit: number = 50): Promise<Order[]> {
+    return await db
+      .select()
+      .from(orders)
+      .where(eq(orders.mpesaStatus, 'failed'))
+      .orderBy(desc(orders.updatedAt))
+      .limit(limit);
+  }
+
+  async getPaymentAnalytics(startDate?: Date, endDate?: Date): Promise<{
+    totalPayments: number;
+    successfulPayments: number;
+    failedPayments: number;
+    totalRevenue: number;
+    averageProcessingFee: number;
+    paymentMethodBreakdown: {
+      stripe: number;
+      mpesa: number;
+    };
+  }> {
+    // Base query conditions
+    const dateConditions = [];
+    if (startDate) dateConditions.push(gte(orders.createdAt, startDate));
+    if (endDate) dateConditions.push(lt(orders.createdAt, endDate));
+    
+    const whereCondition = dateConditions.length > 0 ? and(...dateConditions) : undefined;
+
+    // Run parallel queries for analytics
+    const [
+      totalPaymentsResult,
+      successfulPaymentsResult,
+      failedPaymentsResult,
+      revenueResult,
+      avgFeeResult,
+      stripeCountResult,
+      mpesaCountResult
+    ] = await Promise.all([
+      // Total payments attempted
+      db.select({ count: count() })
+        .from(orders)
+        .where(whereCondition),
+      
+      // Successful payments
+      db.select({ count: count() })
+        .from(orders)
+        .where(and(
+          whereCondition || sql`true`,
+          sql`paidAt IS NOT NULL`
+        )),
+      
+      // Failed payments  
+      db.select({ count: count() })
+        .from(orders)
+        .where(and(
+          whereCondition || sql`true`,
+          eq(orders.mpesaStatus, 'failed')
+        )),
+      
+      // Total revenue from successful payments
+      db.select({ total: sum(orders.total) })
+        .from(orders)
+        .where(and(
+          whereCondition || sql`true`,
+          sql`paidAt IS NOT NULL`
+        )),
+      
+      // Average processing fee
+      db.select({ avg: avg(orders.paymentProcessingFee) })
+        .from(orders)
+        .where(and(
+          whereCondition || sql`true`,
+          sql`paymentProcessingFee IS NOT NULL`
+        )),
+      
+      // Stripe payments count
+      db.select({ count: count() })
+        .from(orders)
+        .where(and(
+          whereCondition || sql`true`,
+          eq(orders.paymentMethod, 'stripe')
+        )),
+      
+      // M-Pesa payments count
+      db.select({ count: count() })
+        .from(orders)
+        .where(and(
+          whereCondition || sql`true`,
+          eq(orders.paymentMethod, 'mpesa')
+        ))
+    ]);
+
+    return {
+      totalPayments: totalPaymentsResult[0].count,
+      successfulPayments: successfulPaymentsResult[0].count,
+      failedPayments: failedPaymentsResult[0].count,
+      totalRevenue: Number(revenueResult[0].total) || 0,
+      averageProcessingFee: Number(avgFeeResult[0].avg) || 0,
+      paymentMethodBreakdown: {
+        stripe: stripeCountResult[0].count,
+        mpesa: mpesaCountResult[0].count,
+      }
+    };
   }
 }
 

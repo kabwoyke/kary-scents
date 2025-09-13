@@ -949,6 +949,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Convert amount from cents to KES for Mpesa
       const amount = order.total / 100;
 
+      // Record payment initiation with comprehensive tracking
+      await storage.recordPaymentInitiation(order.id, {
+        orderId: order.id,
+        paymentMethod: 'mpesa',
+        currency: 'KES',
+        initiatedAt: new Date(),
+        retryCount: order.paymentRetryCount || 0,
+      });
+
+      // Increment retry count if this is a retry
+      if (order.paymentInitiatedAt) {
+        await storage.incrementPaymentRetryCount(order.id);
+      }
+
       // Initiate STK Push
       const stkResult = await mpesaService.initiateSTKPush({
         phone: normalizedPhone,
