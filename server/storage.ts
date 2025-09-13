@@ -26,7 +26,7 @@ import {
   adminSessions
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, count, sum, gte, lt, avg, and, sql } from "drizzle-orm";
+import { eq, desc, count, sum, gte, lt, avg, and, sql, or, ilike } from "drizzle-orm";
 
 export interface IStorage {
   // Products
@@ -47,6 +47,7 @@ export interface IStorage {
   // Admin Orders Management
   getAllOrders(limit?: number, offset?: number): Promise<{ orders: Order[]; total: number }>;
   getOrdersByStatus(status: string, limit?: number, offset?: number): Promise<{ orders: Order[]; total: number }>;
+  searchOrders(searchQuery: string, status?: string, limit?: number, offset?: number): Promise<{ orders: Order[]; total: number }>;
   
   // Admin Sessions
   createAdminSession(session: InsertAdminSession): Promise<AdminSession>;
@@ -210,6 +211,32 @@ export class DatabaseStorage implements IStorage {
     const [ordersResult, totalResult] = await Promise.all([
       db.select().from(orders).where(eq(orders.status, status)).orderBy(desc(orders.createdAt)).limit(limit).offset(offset),
       db.select({ count: count() }).from(orders).where(eq(orders.status, status))
+    ]);
+    
+    return {
+      orders: ordersResult,
+      total: totalResult[0].count
+    };
+  }
+
+  async searchOrders(searchQuery: string, status?: string, limit: number = 50, offset: number = 0): Promise<{ orders: Order[]; total: number }> {
+    // Build search conditions - search in order ID, customer name, email, and phone
+    const searchPattern = `%${searchQuery}%`;
+    const searchConditions = or(
+      ilike(sql`(${orders.id})::text`, searchPattern),
+      ilike(orders.customerName, searchPattern),
+      ilike(orders.customerEmail, searchPattern),
+      ilike(orders.customerPhone, searchPattern)
+    );
+
+    // Combine search with optional status filter
+    const whereClause = status 
+      ? and(searchConditions, eq(orders.status, status))
+      : searchConditions;
+
+    const [ordersResult, totalResult] = await Promise.all([
+      db.select().from(orders).where(whereClause).orderBy(desc(orders.createdAt)).limit(limit).offset(offset),
+      db.select({ count: count() }).from(orders).where(whereClause)
     ]);
     
     return {

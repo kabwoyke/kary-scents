@@ -47,7 +47,7 @@ export const orders = pgTable("orders", {
   mpesaMerchantRequestId: text("mpesa_merchant_request_id"),
   mpesaCheckoutRequestId: text("mpesa_checkout_request_id"),
   mpesaReceiptNumber: text("mpesa_receipt_number"),
-  mpesaStatus: text("mpesa_status"), // 'initiated' | 'pending' | 'paid' | 'failed'
+  mpesaStatus: text("mpesa_status"), // 'initiated' | 'pending' | 'paid' | 'failed' | 'cancelled'
   mpesaPhone: text("mpesa_phone"), // E.164 normalized phone
   
   createdAt: timestamp("created_at").defaultNow(),

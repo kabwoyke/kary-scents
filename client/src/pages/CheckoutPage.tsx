@@ -210,6 +210,16 @@ export default function CheckoutPage() {
       setTimeout(() => {
         setLocation("/");
       }, 2000);
+    } else if (paymentStatus && paymentStatus.mpesaStatus === 'cancelled') {
+      setPaymentPollingEnabled(false);
+      setIsWaitingForPayment(false);
+      setPaymentStartTime(null);
+      setPaymentTimeoutReached(false);
+      setCurrentOrderId(null);
+      toast({
+        title: "Transaction Cancelled",
+        description: "M-Pesa payment has been cancelled. You can choose a different payment method or try again.",
+      });
     } else if (paymentStatus && paymentStatus.mpesaStatus === 'failed') {
       setPaymentPollingEnabled(false);
       setIsWaitingForPayment(false);
@@ -288,13 +298,16 @@ export default function CheckoutPage() {
     },
     onSuccess: () => {
       toast({
-        title: "Payment cancelled",
-        description: "You can choose a different payment method or try again later.",
+        title: "Transaction Cancelled",
+        description: "M-Pesa payment has been cancelled. You can choose a different payment method or try again.",
       });
+      // Immediately stop all payment processes
       setIsWaitingForPayment(false);
       setPaymentPollingEnabled(false);
       setPaymentStartTime(null);
       setPaymentTimeoutReached(false);
+      // Reset order state so user can start over
+      setCurrentOrderId(null);
     },
     onError: (error: any) => {
       toast({
@@ -900,7 +913,14 @@ export default function CheckoutPage() {
                           disabled={cancelPaymentMutation.isPending}
                           data-testid="button-cancel-payment"
                         >
-                          Cancel
+                          {cancelPaymentMutation.isPending ? (
+                            <>
+                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                              Cancelling...
+                            </>
+                          ) : (
+                            "Cancel Payment"
+                          )}
                         </Button>
                       </div>
                     </div>

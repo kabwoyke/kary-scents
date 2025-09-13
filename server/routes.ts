@@ -513,11 +513,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const limit = parseInt(req.query.limit as string) || 50;
       const offset = parseInt(req.query.offset as string) || 0;
       const status = req.query.status as string;
+      const search = req.query.search as string;
       
       let result;
-      if (status) {
+      if (search) {
+        // If search query provided, search with optional status filter
+        result = await storage.searchOrders(search, status, limit, offset);
+      } else if (status) {
+        // If only status filter provided
         result = await storage.getOrdersByStatus(status, limit, offset);
       } else {
+        // No filters, get all orders
         result = await storage.getAllOrders(limit, offset);
       }
       
@@ -1447,7 +1453,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Mark payment as cancelled
       await storage.updateOrderMpesaDetails(order.id, {
-        mpesaStatus: 'failed',
+        mpesaStatus: 'cancelled' as any,
       });
 
       console.log(`Payment cancelled for order ${order.id}`);

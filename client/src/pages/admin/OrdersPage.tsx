@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { 
@@ -19,7 +20,11 @@ import {
   User,
   MapPin,
   Phone,
-  Mail
+  Mail,
+  Search,
+  Filter,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 
 interface Order {
@@ -48,19 +53,32 @@ const statusConfig = {
 export default function AdminOrdersPage() {
   const [, setLocation] = useLocation();
   const [selectedStatus, setSelectedStatus] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [limit] = useState(20);
   const { toast } = useToast();
 
-  // Fetch orders based on status filter
+  const offset = (currentPage - 1) * limit;
+
+  // Fetch orders with search and pagination
   const { data: ordersData, isLoading: ordersLoading, error } = useQuery({
-    queryKey: ["/api/admin/orders", selectedStatus],
+    queryKey: ["/api/admin/orders", selectedStatus, searchQuery, currentPage],
     queryFn: async () => {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({
+        limit: limit.toString(),
+        offset: offset.toString(),
+      });
+      
       if (selectedStatus !== "all") {
         params.append("status", selectedStatus);
       }
-      params.append("limit", "100"); // Get more orders for admin
+      if (searchQuery.trim()) {
+        params.append("search", searchQuery.trim());
+      }
       
-      const response = await fetch(`/api/admin/orders?${params}`);
+      const response = await fetch(`/api/admin/orders?${params}`, {
+        credentials: "include",
+      });
       if (!response.ok) {
         throw new Error("Failed to fetch orders");
       }
@@ -101,7 +119,7 @@ export default function AdminOrdersPage() {
     },
   });
 
-  const handleStatusChange = (orderId: string, newStatus: string) => {
+  const handleOrderStatusChange = (orderId: string, newStatus: string) => {
     updateOrderStatusMutation.mutate({ id: orderId, status: newStatus });
   };
 
@@ -123,6 +141,18 @@ export default function AdminOrdersPage() {
 
   const orders = ordersData?.orders || [];
   const totalOrders = ordersData?.total || 0;
+  const totalPages = Math.ceil(totalOrders / limit);
+
+  // Reset to first page when search query or status changes
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    setCurrentPage(1);
+  };
+
+  const handleStatusChange = (value: string) => {
+    setSelectedStatus(value);
+    setCurrentPage(1);
+  };
 
   const ordersByStatus = {
     all: orders,
@@ -179,8 +209,46 @@ export default function AdminOrdersPage() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Search and Filters */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Filter className="w-5 h-5" />
+              Search & Filters
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col md:flex-row gap-4">
+              <div className="flex-1">
+                <div className="relative">
+                  <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search by order ID, customer name, email, or phone..."
+                    value={searchQuery}
+                    onChange={(e) => handleSearchChange(e.target.value)}
+                    className="pl-10"
+                    data-testid="input-order-search"
+                  />
+                </div>
+              </div>
+              <Select value={selectedStatus} onValueChange={handleStatusChange}>
+                <SelectTrigger className="w-full md:w-40" data-testid="select-order-status">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="processing">Processing</SelectItem>
+                  <SelectItem value="shipped">Shipped</SelectItem>
+                  <SelectItem value="delivered">Delivered</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Status Tabs */}
-        <Tabs value={selectedStatus} onValueChange={setSelectedStatus} className="mb-8">
+        <Tabs value={selectedStatus} onValueChange={handleStatusChange} className="mb-8">
           <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="all" data-testid="tab-all-orders">
               All Orders ({totalOrders})
@@ -262,7 +330,7 @@ export default function AdminOrdersPage() {
                               </Badge>
                               <Select
                                 value={order.status}
-                                onValueChange={(value) => handleStatusChange(order.id, value)}
+                                onValueChange={(value) => handleOrderStatusChange(order.id, value)}
                                 disabled={updateOrderStatusMutation.isPending}
                               >
                                 <SelectTrigger className="w-32" data-testid={`select-status-${order.id}`}>
@@ -352,6 +420,44 @@ export default function AdminOrdersPage() {
                       </Card>
                     );
                   })}
+
+                  {/* Pagination */}
+                  {totalOrders > limit && (
+                    <Card className="mt-6">
+                      <CardContent className="pt-6">
+                        <div className="flex items-center justify-between">
+                          <div className="text-sm text-muted-foreground">
+                            Showing {offset + 1} to {Math.min(offset + limit, totalOrders)} of {totalOrders} orders
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                              disabled={currentPage === 1}
+                              data-testid="button-previous-page"
+                            >
+                              <ChevronLeft className="w-4 h-4" />
+                              Previous
+                            </Button>
+                            <div className="text-sm">
+                              Page {currentPage} of {totalPages}
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                              disabled={currentPage === totalPages}
+                              data-testid="button-next-page"
+                            >
+                              Next
+                              <ChevronRight className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
                 </div>
               )}
             </TabsContent>
