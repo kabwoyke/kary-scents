@@ -868,7 +868,7 @@ export default function CheckoutPage() {
                     </div>
                   )}
 
-                  {isWaitingForPayment && currentOrderId && (
+                  {isWaitingForPayment && currentOrderId && !paymentTimeoutReached && (
                     <div className="text-sm text-center mt-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                       <p className="font-medium text-blue-900 dark:text-blue-100">
                         Complete payment on your phone
@@ -877,16 +877,9 @@ export default function CheckoutPage() {
                         Check your phone for M-Pesa payment prompt
                       </p>
                       
-                      {paymentTimeoutReached && (
-                        <div className="mt-2 p-2 bg-yellow-100 dark:bg-yellow-900/20 rounded">
-                          <p className="text-yellow-800 dark:text-yellow-200 text-xs">
-                            Payment is taking longer than expected. You can resend the STK push or cancel.
-                          </p>
-                        </div>
-                      )}
-                      
                       <div className="mt-3 flex justify-center space-x-2">
                         <Button
+                          type="button"
                           variant="outline"
                           size="sm"
                           onClick={() => resendSTKMutation.mutate(currentOrderId)}
@@ -907,6 +900,7 @@ export default function CheckoutPage() {
                         </Button>
                         
                         <Button
+                          type="button"
                           variant="outline"
                           size="sm"
                           onClick={() => cancelPaymentMutation.mutate(currentOrderId)}
@@ -932,10 +926,11 @@ export default function CheckoutPage() {
                         Payment timeout
                       </p>
                       <p className="text-amber-700 dark:text-amber-300 mt-1">
-                        If payment was deducted, it will be processed automatically
+                        Payment is taking longer than expected. You can try again or cancel.
                       </p>
-                      <div className="mt-2 flex justify-center space-x-2">
+                      <div className="mt-3 flex justify-center space-x-2">
                         <Button
+                          type="button"
                           variant="outline"
                           size="sm"
                           onClick={() => {
@@ -956,7 +951,25 @@ export default function CheckoutPage() {
                               Retrying...
                             </>
                           ) : (
-                            "Retry Payment"
+                            "Try Again"
+                          )}
+                        </Button>
+                        
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => cancelPaymentMutation.mutate(currentOrderId)}
+                          disabled={cancelPaymentMutation.isPending}
+                          data-testid="button-cancel-payment-timeout"
+                        >
+                          {cancelPaymentMutation.isPending ? (
+                            <>
+                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                              Cancelling...
+                            </>
+                          ) : (
+                            "Cancel Payment"
                           )}
                         </Button>
                       </div>

@@ -490,6 +490,90 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Admin review CRUD routes
+  app.post("/api/admin/reviews", requireAdminAuth, async (req, res) => {
+    try {
+      const validatedData = insertReviewSchema.parse(req.body);
+      const review = await storage.createReview(validatedData);
+      res.status(201).json(review);
+    } catch (error) {
+      console.error("Error creating review:", error);
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: "Invalid review data", details: error.errors });
+      } else {
+        res.status(500).json({ error: "Failed to create review" });
+      }
+    }
+  });
+
+  app.put("/api/admin/reviews/:id", requireAdminAuth, async (req, res) => {
+    try {
+      const reviewId = req.params.id;
+      const validatedData = insertReviewSchema.partial().parse(req.body);
+      
+      const review = await storage.getReviewById(reviewId);
+      if (!review) {
+        return res.status(404).json({ error: "Review not found" });
+      }
+      
+      const updatedReview = await storage.updateReview(reviewId, validatedData);
+      if (!updatedReview) {
+        return res.status(404).json({ error: "Review not found" });
+      }
+      
+      res.json(updatedReview);
+    } catch (error) {
+      console.error("Error updating review:", error);
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: "Invalid review data", details: error.errors });
+      } else {
+        res.status(500).json({ error: "Failed to update review" });
+      }
+    }
+  });
+
+  app.delete("/api/admin/reviews/:id", requireAdminAuth, async (req, res) => {
+    try {
+      const reviewId = req.params.id;
+      
+      const review = await storage.getReviewById(reviewId);
+      if (!review) {
+        return res.status(404).json({ error: "Review not found" });
+      }
+      
+      const deleted = await storage.deleteReview(reviewId);
+      if (!deleted) {
+        return res.status(500).json({ error: "Failed to delete review" });
+      }
+      
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting review:", error);
+      res.status(500).json({ error: "Failed to delete review" });
+    }
+  });
+
+  // Enhanced GET route for admin reviews with search functionality
+  app.get("/api/admin/reviews/search", requireAdminAuth, async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 50;
+      const offset = parseInt(req.query.offset as string) || 0;
+      const status = req.query.status as string;
+      const search = req.query.search as string;
+      
+      if (search) {
+        const result = await storage.searchReviews(search, status, limit, offset);
+        res.json(result);
+      } else {
+        const result = await storage.getAllReviews(status, limit, offset);
+        res.json(result);
+      }
+    } catch (error) {
+      console.error("Error searching reviews:", error);
+      res.status(500).json({ error: "Failed to search reviews" });
+    }
+  });
+
   // Admin Products endpoint (distinct from public products)
   app.get("/api/admin/products", requireAdminAuth, async (req, res) => {
     try {
@@ -572,6 +656,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error updating order status:", error);
       res.status(500).json({ error: "Failed to update order status" });
+    }
+  });
+
+  app.delete("/api/admin/orders/:id", requireAdminAuth, async (req, res) => {
+    try {
+      const deleted = await storage.deleteOrder(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting order:", error);
+      res.status(500).json({ error: "Failed to delete order" });
     }
   });
 

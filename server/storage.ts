@@ -43,6 +43,7 @@ export interface IStorage {
   updateOrderStatus(id: string, status: string): Promise<Order | undefined>;
   updateOrderPaymentIntent(id: string, paymentIntentId: string): Promise<Order | undefined>;
   updateOrderPayment(id: string, updates: UpdateOrderPayment): Promise<Order | undefined>;
+  deleteOrder(id: string): Promise<boolean>;
   
   // Admin Orders Management
   getAllOrders(limit?: number, offset?: number): Promise<{ orders: Order[]; total: number }>;
@@ -67,9 +68,12 @@ export interface IStorage {
   createReview(review: InsertReview): Promise<Review>;
   getProductReviews(productId: string, status?: string): Promise<Review[]>;
   getReviewById(id: string): Promise<Review | undefined>;
+  updateReview(id: string, updates: Partial<InsertReview>): Promise<Review | undefined>;
   updateReviewStatus(id: string, status: UpdateReviewStatus): Promise<Review | undefined>;
+  deleteReview(id: string): Promise<boolean>;
   getAllPendingReviews(limit?: number, offset?: number): Promise<{ reviews: Review[]; total: number }>;
   getAllReviews(status?: string, limit?: number, offset?: number): Promise<{ reviews: Review[]; total: number }>;
+  searchReviews(searchQuery: string, status?: string, limit?: number, offset?: number): Promise<{ reviews: Review[]; total: number }>;
   getProductAverageRating(productId: string): Promise<number>;
   
   // Payments
@@ -192,6 +196,18 @@ export class DatabaseStorage implements IStorage {
       .where(eq(orders.id, id))
       .returning();
     return result[0];
+  }
+
+  async deleteOrder(id: string): Promise<boolean> {
+    return await db.transaction(async (tx) => {
+      // First delete order items
+      await tx.delete(orderItems).where(eq(orderItems.orderId, id));
+      
+      // Then delete the order
+      const result = await tx.delete(orders).where(eq(orders.id, id));
+      
+      return result.rowCount > 0;
+    });
   }
 
   // Admin Orders Management
@@ -407,6 +423,45 @@ export class DatabaseStorage implements IStorage {
       ));
     
     return Number(result[0].avgRating) || 0;
+  }
+
+  async updateReview(id: string, updates: Partial<InsertReview>): Promise<Review | undefined> {
+    const result = await db
+      .update(reviews)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(reviews.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deleteReview(id: string): Promise<boolean> {
+    const result = await db.delete(reviews).where(eq(reviews.id, id));
+    return (result as any).rowCount > 0;
+  }
+
+  async searchReviews(searchQuery: string, status?: string, limit: number = 50, offset: number = 0): Promise<{ reviews: Review[]; total: number }> {
+    let whereCondition = or(
+      ilike(reviews.customerName, `%${searchQuery}%`),
+      ilike(reviews.comment, `%${searchQuery}%`)
+    );
+    
+    if (status) {
+      whereCondition = and(whereCondition, eq(reviews.status, status as any));
+    }
+    
+    const [reviewsResult, totalResult] = await Promise.all([
+      db.select().from(reviews)
+        .where(whereCondition)
+        .orderBy(desc(reviews.createdAt))
+        .limit(limit)
+        .offset(offset),
+      db.select({ count: count() }).from(reviews).where(whereCondition)
+    ]);
+    
+    return {
+      reviews: reviewsResult,
+      total: totalResult[0].count
+    };
   }
 
   // Mpesa Orders

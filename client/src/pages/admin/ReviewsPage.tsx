@@ -1,11 +1,20 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { useLocation } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import ReviewCard, { Review } from "@/components/ReviewCard";
@@ -17,7 +26,12 @@ import {
   Star,
   TrendingUp,
   Users,
-  LogOut
+  LogOut,
+  Plus,
+  Edit,
+  Trash2,
+  Search,
+  Filter
 } from "lucide-react";
 
 interface AdminReviewsData {
@@ -34,21 +48,62 @@ interface ReviewStats {
   rejectedReviews: number;
 }
 
+const reviewFormSchema = z.object({
+  productId: z.string().min(1, "Product ID is required"),
+  customerName: z.string().min(1, "Customer name is required").optional(),
+  rating: z.number().min(1, "Rating must be at least 1").max(5, "Rating cannot exceed 5"),
+  content: z.string().min(10, "Content must be at least 10 characters"),
+  status: z.enum(["pending", "approved", "rejected"]),
+});
+
+type ReviewFormData = z.infer<typeof reviewFormSchema>;
+
 export default function AdminReviewsPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const [selectedStatus, setSelectedStatus] = useState<"pending" | "all">("pending");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editingReview, setEditingReview] = useState<Review | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [limit] = useState(20);
 
-  // Fetch filtered reviews
+  // Form initialization
+  const form = useForm<ReviewFormData>({
+    resolver: zodResolver(reviewFormSchema),
+    defaultValues: {
+      productId: "",
+      customerName: "",
+      rating: 5,
+      content: "",
+      status: "pending",
+    },
+  });
+
+  const offset = (currentPage - 1) * limit;
+
+  // Fetch filtered reviews with search
   const { 
     data: reviewsData, 
     isLoading: reviewsLoading, 
     error: reviewsError 
   } = useQuery<AdminReviewsData>({
-    queryKey: ["/api/admin/reviews", selectedStatus],
+    queryKey: ["/api/admin/reviews", selectedStatus, searchQuery, currentPage],
     queryFn: async () => {
-      const params = selectedStatus === "pending" ? "?status=pending" : "";
-      const response = await fetch(`/api/admin/reviews${params}`, {
+      const params = new URLSearchParams();
+      params.append('limit', limit.toString());
+      params.append('offset', offset.toString());
+      
+      if (selectedStatus !== "all") {
+        params.append('status', selectedStatus);
+      }
+      if (searchQuery.trim()) {
+        params.append('search', searchQuery.trim());
+      }
+      
+      const endpoint = searchQuery ? "/api/admin/reviews/search" : "/api/admin/reviews";
+      const response = await fetch(`${endpoint}?${params}`, {
         credentials: "include",
       });
       if (!response.ok) {
@@ -80,8 +135,55 @@ export default function AdminReviewsPage() {
     rejectedReviews: allReviewsData?.reviews.filter(r => r.status === "rejected").length || 0,
   };
 
-  // Mutation for updating review status
+  // Create review mutation
+  const createReviewMutation = useMutation({
+    mutationFn: async (data: ReviewFormData) => {
+      return apiRequest("POST", "/api/admin/reviews", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/reviews"] });
+      toast({
+        title: "Success",
+        description: "Review created successfully",
+      });
+      setIsCreateDialogOpen(false);
+      form.reset();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create review",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Update review mutation
   const updateReviewMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: ReviewFormData }) => {
+      return apiRequest("PUT", `/api/admin/reviews/${id}`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/reviews"] });
+      toast({
+        title: "Success",
+        description: "Review updated successfully",
+      });
+      setIsEditDialogOpen(false);
+      setEditingReview(null);
+      form.reset();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update review",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Update review status mutation
+  const updateReviewStatusMutation = useMutation({
     mutationFn: async ({ reviewId, status }: { reviewId: string; status: "approved" | "rejected" }) => {
       const response = await fetch(`/api/admin/reviews/${reviewId}`, {
         method: "PATCH",
@@ -114,12 +216,71 @@ export default function AdminReviewsPage() {
     },
   });
 
+  // Delete review mutation
+  const deleteReviewMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("DELETE", `/api/admin/reviews/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/reviews"] });
+      toast({
+        title: "Success",
+        description: "Review deleted successfully",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete review",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Handler functions
+  const handleSubmit = (data: ReviewFormData) => {
+    if (editingReview) {
+      updateReviewMutation.mutate({ id: editingReview.id, data });
+    } else {
+      createReviewMutation.mutate(data);
+    }
+  };
+
+  const handleEdit = (review: Review) => {
+    setEditingReview(review);
+    form.reset({
+      productId: review.productId,
+      customerName: review.customerName || "",
+      rating: review.rating,
+      content: review.content,
+      status: review.status as "pending" | "approved" | "rejected",
+    });
+    setIsEditDialogOpen(true);
+  };
+
+  const handleDelete = (review: Review) => {
+    if (confirm(`Are you sure you want to delete the review by ${review.customerName}?`)) {
+      deleteReviewMutation.mutate(review.id);
+    }
+  };
+
   const handleApprove = (reviewId: string) => {
-    updateReviewMutation.mutate({ reviewId, status: "approved" });
+    updateReviewStatusMutation.mutate({ reviewId, status: "approved" });
   };
 
   const handleReject = (reviewId: string) => {
-    updateReviewMutation.mutate({ reviewId, status: "rejected" });
+    updateReviewStatusMutation.mutate({ reviewId, status: "rejected" });
+  };
+
+  const handleCloseCreateDialog = () => {
+    setIsCreateDialogOpen(false);
+    form.reset();
+  };
+
+  const handleCloseEditDialog = () => {
+    setIsEditDialogOpen(false);
+    setEditingReview(null);
+    form.reset();
   };
 
   const handleLogout = async () => {
@@ -174,6 +335,14 @@ export default function AdminReviewsPage() {
               <h2 className="text-lg font-medium text-foreground">Reviews</h2>
             </div>
             <div className="flex items-center gap-4">
+              <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button data-testid="button-create-review">
+                    <Plus className="w-4 h-4 mr-2" />
+                    Create Review
+                  </Button>
+                </DialogTrigger>
+              </Dialog>
               <Button
                 variant="outline"
                 onClick={() => setLocation("/admin/dashboard")}
@@ -201,6 +370,34 @@ export default function AdminReviewsPage() {
           <p className="text-muted-foreground">
             Moderate customer reviews and maintain quality standards
           </p>
+        </div>
+
+        {/* Search and Filter Controls */}
+        <div className="flex flex-col sm:flex-row gap-4 mb-6">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+            <Input
+              placeholder="Search reviews by customer name or comment..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10"
+              data-testid="input-search-reviews"
+            />
+          </div>
+          <div className="flex gap-2">
+            <Select value={selectedStatus} onValueChange={(value: "pending" | "all") => setSelectedStatus(value)}>
+              <SelectTrigger className="w-[180px]" data-testid="select-status-filter">
+                <Filter className="w-4 h-4 mr-2" />
+                <SelectValue placeholder="Filter by status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Reviews</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="approved">Approved</SelectItem>
+                <SelectItem value="rejected">Rejected</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         {/* Stats Cards */}

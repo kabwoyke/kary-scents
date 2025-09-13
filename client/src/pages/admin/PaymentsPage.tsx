@@ -1,5 +1,8 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,6 +10,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { 
   CreditCard, 
   Smartphone, 
@@ -17,7 +25,10 @@ import {
   DollarSign,
   TrendingUp,
   AlertCircle,
-  CheckCircle
+  CheckCircle,
+  Plus,
+  Edit,
+  Trash2
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -43,12 +54,42 @@ interface PaymentAnalytics {
   statusBreakdown: { [status: string]: number; };
 }
 
+const paymentSchema = z.object({
+  orderId: z.string().min(1, "Order ID is required"),
+  paymentMethod: z.enum(["stripe", "mpesa"], {
+    required_error: "Please select a payment method",
+  }),
+  amount: z.number().min(1, "Amount must be greater than 0"),
+  status: z.enum(["pending", "completed", "failed"]),
+  transactionId: z.string().optional(),
+  processingFee: z.number().min(0).optional(),
+});
+
+type PaymentFormData = z.infer<typeof paymentSchema>;
+
 export default function PaymentsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [paymentMethod, setPaymentMethod] = useState<string>('all');
   const [paymentStatus, setPaymentStatus] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [limit] = useState(50);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
+  const { toast } = useToast();
+
+  // Form initialization
+  const form = useForm<PaymentFormData>({
+    resolver: zodResolver(paymentSchema),
+    defaultValues: {
+      orderId: "",
+      paymentMethod: "stripe",
+      amount: 0,
+      status: "pending",
+      transactionId: "",
+      processingFee: 0,
+    },
+  });
 
   const offset = (currentPage - 1) * limit;
 
@@ -98,7 +139,117 @@ export default function PaymentsPage() {
     },
   });
 
+  // Create payment mutation
+  const createPaymentMutation = useMutation({
+    mutationFn: async (data: PaymentFormData) => {
+      return apiRequest("POST", "/api/admin/payments", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/payments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/payments/analytics"] });
+      toast({
+        title: "Success",
+        description: "Payment record created successfully",
+      });
+      setIsCreateDialogOpen(false);
+      form.reset();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create payment record",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Update payment mutation
+  const updatePaymentMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: PaymentFormData }) => {
+      return apiRequest("PUT", `/api/admin/payments/${id}`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/payments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/payments/analytics"] });
+      toast({
+        title: "Success",
+        description: "Payment record updated successfully",
+      });
+      setIsEditDialogOpen(false);
+      setEditingPayment(null);
+      form.reset();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update payment record",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Delete payment mutation
+  const deletePaymentMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("DELETE", `/api/admin/payments/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/payments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/payments/analytics"] });
+      toast({
+        title: "Success",
+        description: "Payment record deleted successfully",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete payment record",
+        variant: "destructive",
+      });
+    },
+  });
+
   const totalPages = paymentsData ? Math.ceil(paymentsData.total / limit) : 0;
+
+  // Handler functions
+  const handleSubmit = (data: PaymentFormData) => {
+    if (editingPayment) {
+      updatePaymentMutation.mutate({ id: editingPayment.id, data });
+    } else {
+      createPaymentMutation.mutate(data);
+    }
+  };
+
+  const handleEdit = (payment: Payment) => {
+    setEditingPayment(payment);
+    form.reset({
+      orderId: payment.orderId,
+      paymentMethod: payment.paymentMethod,
+      amount: payment.amount,
+      status: payment.status,
+      transactionId: payment.transactionId || "",
+      processingFee: payment.processingFee || 0,
+    });
+    setIsEditDialogOpen(true);
+  };
+
+  const handleDelete = (payment: Payment) => {
+    if (confirm(`Are you sure you want to delete payment record for Order ${payment.orderId}?`)) {
+      deletePaymentMutation.mutate(payment.id);
+    }
+  };
+
+  const handleCloseCreateDialog = () => {
+    setIsCreateDialogOpen(false);
+    form.reset();
+  };
+
+  const handleCloseEditDialog = () => {
+    setIsEditDialogOpen(false);
+    setEditingPayment(null);
+    form.reset();
+  };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -173,6 +324,14 @@ export default function PaymentsPage() {
                 Payment Management
               </h1>
             </div>
+            <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+              <DialogTrigger asChild>
+                <Button data-testid="button-create-payment">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Create Payment
+                </Button>
+              </DialogTrigger>
+            </Dialog>
           </div>
         </div>
       </header>
@@ -345,6 +504,7 @@ export default function PaymentsPage() {
                       <TableHead>Transaction ID</TableHead>
                       <TableHead>Processing Fee</TableHead>
                       <TableHead>Created</TableHead>
+                      <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -378,11 +538,33 @@ export default function PaymentsPage() {
                           <TableCell>
                             {format(new Date(payment.createdAt), 'MMM dd, yyyy HH:mm')}
                           </TableCell>
+                          <TableCell>
+                            <div className="flex items-center space-x-2">
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                onClick={() => handleEdit(payment)}
+                                disabled={updatePaymentMutation.isPending}
+                                data-testid={`button-edit-payment-${payment.id}`}
+                              >
+                                <Edit className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                onClick={() => handleDelete(payment)}
+                                disabled={deletePaymentMutation.isPending}
+                                data-testid={`button-delete-payment-${payment.id}`}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
                         </TableRow>
                       ))
                     ) : (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                           No payments found matching your criteria
                         </TableCell>
                       </TableRow>
@@ -427,6 +609,291 @@ export default function PaymentsPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Create/Edit Dialog */}
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {editingPayment ? "Edit Payment Record" : "Create Payment Record"}
+            </DialogTitle>
+            <DialogDescription>
+              {editingPayment 
+                ? "Update the payment record details below."
+                : "Create a new payment record manually."
+              }
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
+              <FormField
+                control={form.control}
+                name="orderId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Order ID</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Enter order ID" {...field} data-testid="input-order-id" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="paymentMethod"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Payment Method</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-payment-method">
+                          <SelectValue placeholder="Select payment method" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="stripe">Stripe</SelectItem>
+                        <SelectItem value="mpesa">M-Pesa</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="amount"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Amount (in cents)</FormLabel>
+                    <FormControl>
+                      <Input 
+                        type="number" 
+                        placeholder="Amount in cents" 
+                        {...field}
+                        onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
+                        data-testid="input-amount"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="status"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Status</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-status">
+                          <SelectValue placeholder="Select status" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="pending">Pending</SelectItem>
+                        <SelectItem value="completed">Completed</SelectItem>
+                        <SelectItem value="failed">Failed</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="transactionId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Transaction ID (Optional)</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Transaction ID" {...field} data-testid="input-transaction-id" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="processingFee"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Processing Fee (Optional)</FormLabel>
+                    <FormControl>
+                      <Input 
+                        type="number" 
+                        placeholder="Processing fee in cents" 
+                        {...field}
+                        onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
+                        data-testid="input-processing-fee"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <div className="flex justify-end space-x-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={editingPayment ? handleCloseEditDialog : handleCloseCreateDialog}
+                  disabled={createPaymentMutation.isPending || updatePaymentMutation.isPending}
+                  data-testid="button-cancel-payment-form"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={createPaymentMutation.isPending || updatePaymentMutation.isPending}
+                  data-testid="button-submit-payment-form"
+                >
+                  {editingPayment ? "Update Payment" : "Create Payment"}
+                </Button>
+              </div>
+            </form>
+          </Form>
+        </DialogContent>
+
+        {/* Edit Dialog */}
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Payment Record</DialogTitle>
+              <DialogDescription>
+                Update the payment record details below.
+              </DialogDescription>
+            </DialogHeader>
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
+                <FormField
+                  control={form.control}
+                  name="orderId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Order ID</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Enter order ID" {...field} data-testid="input-edit-order-id" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="paymentMethod"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Payment Method</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-edit-payment-method">
+                            <SelectValue placeholder="Select payment method" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="stripe">Stripe</SelectItem>
+                          <SelectItem value="mpesa">M-Pesa</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="amount"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Amount (in cents)</FormLabel>
+                      <FormControl>
+                        <Input 
+                          type="number" 
+                          placeholder="Amount in cents" 
+                          {...field}
+                          onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
+                          data-testid="input-edit-amount"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="status"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Status</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-edit-status">
+                            <SelectValue placeholder="Select status" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="pending">Pending</SelectItem>
+                          <SelectItem value="completed">Completed</SelectItem>
+                          <SelectItem value="failed">Failed</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="transactionId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Transaction ID (Optional)</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Transaction ID" {...field} data-testid="input-edit-transaction-id" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="processingFee"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Processing Fee (Optional)</FormLabel>
+                      <FormControl>
+                        <Input 
+                          type="number" 
+                          placeholder="Processing fee in cents" 
+                          {...field}
+                          onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
+                          data-testid="input-edit-processing-fee"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <div className="flex justify-end space-x-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleCloseEditDialog}
+                    disabled={updatePaymentMutation.isPending}
+                    data-testid="button-cancel-edit-payment"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={updatePaymentMutation.isPending}
+                    data-testid="button-update-payment"
+                  >
+                    Update Payment
+                  </Button>
+                </div>
+              </form>
+            </Form>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
