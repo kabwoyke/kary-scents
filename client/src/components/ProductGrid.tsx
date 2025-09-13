@@ -1,5 +1,6 @@
 import { useState } from "react";
 import ProductCard, { type Product } from "./ProductCard";
+import ProductDetailModal from "./ProductDetailModal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -22,9 +23,21 @@ export default function ProductGrid({
   const [sortBy, setSortBy] = useState("name");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Get unique categories
   const categories = Array.from(new Set(products.map(p => p.category)));
+
+  const handleViewDetails = (product: Product) => {
+    setSelectedProduct(product);
+    setIsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setSelectedProduct(null);
+  };
 
   // Filter and sort products
   const filteredProducts = products
@@ -132,6 +145,7 @@ export default function ProductGrid({
                 product={product}
                 onAddToCart={onAddToCart}
                 onToggleFavorite={onToggleFavorite}
+                onViewDetails={handleViewDetails}
               />
             ))}
           </div>
@@ -141,6 +155,16 @@ export default function ProductGrid({
               {searchTerm ? `No products found for "${searchTerm}"` : "No products available"}
             </p>
           </div>
+        )}
+
+        {/* Product Detail Modal */}
+        {selectedProduct && (
+          <ProductDetailModal
+            product={selectedProduct}
+            open={isModalOpen}
+            onOpenChange={handleCloseModal}
+            onAddToCart={onAddToCart}
+          />
         )}
       </div>
     </section>

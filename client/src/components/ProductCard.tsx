@@ -1,4 +1,4 @@
-import { ShoppingCart, Heart } from "lucide-react";
+import { ShoppingCart, Heart, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -21,12 +21,14 @@ interface ProductCardProps {
   product: Product;
   onAddToCart?: (product: Product) => void;
   onToggleFavorite?: (productId: string) => void;
+  onViewDetails?: (product: Product) => void;
 }
 
 export default function ProductCard({ 
   product, 
   onAddToCart, 
-  onToggleFavorite 
+  onToggleFavorite,
+  onViewDetails 
 }: ProductCardProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [isFavorited, setIsFavorited] = useState(product.isFavorite || false);
@@ -46,6 +48,10 @@ export default function ProductCard({
     setIsFavorited(!isFavorited);
     onToggleFavorite?.(product.id);
     console.log('Toggled favorite:', product.name);
+  };
+
+  const handleViewDetails = () => {
+    onViewDetails?.(product);
   };
 
   const discount = product.originalPrice 
@@ -109,34 +115,49 @@ export default function ProductCard({
         </div>
       </CardContent>
 
-      <CardFooter className="p-4 pt-0 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-lg font-semibold text-foreground" data-testid={`text-price-${product.id}`}>
-            Ksh {product.price.toLocaleString()}
-          </span>
-          {product.originalPrice && (
-            <span className="text-sm text-muted-foreground line-through">
-              Ksh {product.originalPrice.toLocaleString()}
+      <CardFooter className="p-4 pt-0 space-y-3">
+        <div className="flex items-center justify-between w-full">
+          <div className="flex items-center gap-2">
+            <span className="text-lg font-semibold text-foreground" data-testid={`text-price-${product.id}`}>
+              Ksh {product.price.toLocaleString()}
             </span>
-          )}
+            {product.originalPrice && (
+              <span className="text-sm text-muted-foreground line-through">
+                Ksh {product.originalPrice.toLocaleString()}
+              </span>
+            )}
+          </div>
         </div>
 
-        <Button 
-          size="sm"
-          onClick={handleAddToCart}
-          disabled={isLoading}
-          className="hover-elevate"
-          data-testid={`button-add-to-cart-${product.id}`}
-        >
-          {isLoading ? (
-            "Adding..."
-          ) : (
-            <>
-              <ShoppingCart className="h-4 w-4 mr-1" />
-              Add
-            </>
-          )}
-        </Button>
+        <div className="flex gap-2 w-full">
+          <Button 
+            variant="outline"
+            size="sm"
+            onClick={handleViewDetails}
+            className="flex-1 hover-elevate"
+            data-testid={`button-view-details-${product.id}`}
+          >
+            <Eye className="h-4 w-4 mr-1" />
+            Details
+          </Button>
+          
+          <Button 
+            size="sm"
+            onClick={handleAddToCart}
+            disabled={isLoading}
+            className="flex-1 hover-elevate"
+            data-testid={`button-add-to-cart-${product.id}`}
+          >
+            {isLoading ? (
+              "Adding..."
+            ) : (
+              <>
+                <ShoppingCart className="h-4 w-4 mr-1" />
+                Add
+              </>
+            )}
+          </Button>
+        </div>
       </CardFooter>
     </Card>
   );
