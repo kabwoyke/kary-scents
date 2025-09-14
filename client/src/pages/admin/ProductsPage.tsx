@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
@@ -31,8 +32,17 @@ interface Product {
   price: number;
   originalPrice?: number;
   image: string;
+  categoryId: string;
   category: string;
   isNew: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface Category {
+  id: string;
+  name: string;
+  description?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -43,7 +53,7 @@ const productSchema = z.object({
   price: z.number().min(0.01, "Price must be greater than 0"),
   originalPrice: z.number().optional(),
   image: z.string().url("Please enter a valid image URL"),
-  category: z.string().min(1, "Category is required"),
+  categoryId: z.string().min(1, "Category is required"),
   isNew: z.boolean(),
 });
 
@@ -63,7 +73,7 @@ export default function AdminProductsPage() {
       price: 0,
       originalPrice: undefined,
       image: "",
-      category: "",
+      categoryId: "",
       isNew: false,
     },
   });
@@ -73,15 +83,27 @@ export default function AdminProductsPage() {
     queryKey: ["/api/products"],
   });
 
+  // Fetch categories
+  const { data: categories = [], isLoading: categoriesLoading } = useQuery<Category[]>({
+    queryKey: ["/api/categories"],
+  });
+
   // Create product mutation
   const createProductMutation = useMutation({
     mutationFn: async (data: ProductFormData) => {
+      // Find the category name for the selected categoryId
+      const selectedCategory = categories.find(c => c.id === data.categoryId);
+      const productData = {
+        ...data,
+        category: selectedCategory?.name || "" // Include category name for backward compatibility
+      };
+      
       const response = await fetch("/api/products", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(data),
+        body: JSON.stringify(productData),
         credentials: "include",
       });
       if (!response.ok) {
@@ -109,12 +131,19 @@ export default function AdminProductsPage() {
   // Update product mutation
   const updateProductMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: ProductFormData }) => {
+      // Find the category name for the selected categoryId
+      const selectedCategory = categories.find(c => c.id === data.categoryId);
+      const productData = {
+        ...data,
+        category: selectedCategory?.name || "" // Include category name for backward compatibility
+      };
+      
       const response = await fetch(`/api/products/${id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(data),
+        body: JSON.stringify(productData),
         credentials: "include",
       });
       if (!response.ok) {
@@ -183,7 +212,7 @@ export default function AdminProductsPage() {
       price: product.price,
       originalPrice: product.originalPrice || undefined,
       image: product.image,
-      category: product.category,
+      categoryId: product.categoryId || "",
       isNew: product.isNew,
     });
     setIsDialogOpen(true);
@@ -283,16 +312,28 @@ export default function AdminProductsPage() {
                       />
                       <FormField
                         control={form.control}
-                        name="category"
+                        name="categoryId"
                         render={({ field }) => (
                           <FormItem>
                             <FormLabel>Category</FormLabel>
                             <FormControl>
-                              <Input 
-                                placeholder="e.g., Perfumes, Fragrances" 
-                                data-testid="input-product-category"
-                                {...field} 
-                              />
+                              <Select 
+                                onValueChange={field.onChange} 
+                                value={field.value}
+                                data-testid="select-product-category"
+                                disabled={categoriesLoading}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select a category" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {categories.map((category) => (
+                                    <SelectItem key={category.id} value={category.id}>
+                                      {category.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                             </FormControl>
                             <FormMessage />
                           </FormItem>
