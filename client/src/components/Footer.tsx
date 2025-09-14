@@ -9,7 +9,7 @@ export default function Footer() {
           <div className="space-y-4">
             <div className="flex items-center space-x-2">
               <div className="text-2xl font-serif font-bold text-primary">
-                KARY SCENTS
+                Kary Perfumes
               </div>
             </div>
             <p className="text-muted-foreground">
@@ -59,7 +59,7 @@ export default function Footer() {
         </div>
 
         <div className="mt-8 pt-8 border-t border-border text-center text-sm text-muted-foreground">
-          <p>&copy; 2025 KARY SCENTS. Premium Fragrances in Kenya.</p>
+          <p>&copy; 2025 Kary Perfumes. Premium Fragrances in Kenya.</p>
         </div>
       </div>
     </footer>

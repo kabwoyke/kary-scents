@@ -1,9 +1,13 @@
 import ProductGrid from "@/components/ProductGrid";
 import { type Product } from "@/components/ProductCard";
 import { useCart } from "@/context/CartContext";
+import { useSEO, SEO_CONFIGS } from "@/hooks/use-seo";
 
 export default function ShopPage() {
   const { addItem } = useCart();
+  
+  // Set unique SEO for shop page
+  useSEO(SEO_CONFIGS.shop);
 
   const handleAddToCart = (product: Product) => {
     addItem(product);

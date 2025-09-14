@@ -1,11 +1,15 @@
 import { Phone, MapPin, Clock, MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useSEO, SEO_CONFIGS } from "@/hooks/use-seo";
 
 export default function ContactPage() {
+  // Set unique SEO for contact page
+  useSEO(SEO_CONFIGS.contact);
+  
   const handleCall = () => {
     window.location.href = "tel:0792246027";
-    console.log('Calling KARY PERFUMES');
+    console.log('Calling Kary Perfumes');
   };
 
   const handleWhatsApp = () => {
@@ -23,7 +27,7 @@ export default function ContactPage() {
             Contact Us
           </h1>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Get in touch with KARY SCENTS for inquiries about our premium fragrances
+            Get in touch with Kary Perfumes for inquiries about our premium fragrances
           </p>
         </div>
 
@@ -38,7 +42,7 @@ export default function ContactPage() {
             </CardHeader>
             <CardContent className="space-y-6">
               <div>
-                <h3 className="font-semibold text-foreground mb-2">KARY SCENTS</h3>
+                <h3 className="font-semibold text-foreground mb-2">Kary Perfumes</h3>
                 <p className="text-muted-foreground">
                   Premium Fragrances & Luxury Scents
                 </p>
@@ -137,7 +141,7 @@ export default function ContactPage() {
 
               <div className="text-center pt-4">
                 <p className="text-xs text-muted-foreground">
-                  Welcome to KARY SCENTS
+                  Welcome to Kary Perfumes
                 </p>
               </div>
             </CardContent>

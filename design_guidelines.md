@@ -1,4 +1,4 @@
-# KARY PERFUMES Design Guidelines
+# Kary Perfumes Design Guidelines
 
 ## Design Approach
 **Reference-Based Approach**: Drawing inspiration from luxury e-commerce platforms like Shopify and high-end fragrance brands, combined with Arabic cultural aesthetics to create an elegant, modern perfume shopping experience.
@@ -63,7 +63,7 @@
 
 **Background Elements**: Subtle Arabic pattern overlays, soft gradient backgrounds, and decorative flourishes throughout the site.
 
-**Brand Assets**: KARY PERFUMES logo variations for different contexts (light/dark backgrounds).
+**Brand Assets**: Kary Perfumes logo variations for different contexts (light/dark backgrounds).
 
 ## Key Design Principles
 

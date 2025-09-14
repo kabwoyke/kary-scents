@@ -329,7 +329,7 @@ export default function AdminReviewsPage() {
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-4">
               <h1 className="text-2xl font-serif font-bold text-primary">
-                KARY SCENTS Admin
+                Kary Perfumes Admin
               </h1>
               <Separator orientation="vertical" className="h-6" />
               <h2 className="text-lg font-medium text-foreground">Reviews</h2>

@@ -5,10 +5,14 @@ import { Badge } from "@/components/ui/badge";
 import { Minus, Plus, Trash2, ShoppingBag } from "lucide-react";
 import { useCart } from "@/context/CartContext";
 import { Link, useLocation } from "wouter";
+import { useSEO, SEO_CONFIGS } from "@/hooks/use-seo";
 
 export default function CartPage() {
   const { state, updateQuantity, removeItem } = useCart();
   const [, setLocation] = useLocation();
+  
+  // Set unique SEO for cart page
+  useSEO(SEO_CONFIGS.cart);
 
   const deliveryCharge = 200; // Fixed delivery charge for Nairobi CBD
   const total = state.total + deliveryCharge;
