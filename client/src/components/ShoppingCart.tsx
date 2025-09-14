@@ -36,8 +36,10 @@ export default function ShoppingCart({
     switch (deliveryLocation) {
       case "nairobi-cbd":
         return 200;
-      case "other":
+      case "nairobi-other":
         return 300;
+      case "embu":
+        return 0; // Free delivery
       default:
         return 0;
     }
@@ -193,7 +195,8 @@ export default function ShoppingCart({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="nairobi-cbd">Nairobi CBD - Ksh 200</SelectItem>
-                      <SelectItem value="other">Other Locations - Ksh 300</SelectItem>
+                      <SelectItem value="nairobi-other">Other Nairobi Areas - Ksh 300</SelectItem>
+                      <SelectItem value="embu">Embu - Free Delivery</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

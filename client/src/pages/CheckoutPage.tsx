@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Separator } from "@/components/ui/separator";
@@ -20,7 +21,7 @@ interface CheckoutFormData {
   email: string;
   phone: string;
   address: string;
-  deliveryLocation: "nairobi-cbd" | "nairobi-other";
+  deliveryLocation: "nairobi-cbd" | "nairobi-other" | "embu";
   paymentMethod: "stripe" | "mpesa";
   mpesaPhone: string;
 }
@@ -151,6 +152,7 @@ export default function CheckoutPage() {
   const deliveryCharges = {
     "nairobi-cbd": 200,
     "nairobi-other": 300,
+    "embu": 0, // Free delivery
   };
 
   const deliveryCharge = deliveryCharges[formData.deliveryLocation];
@@ -725,12 +727,13 @@ export default function CheckoutPage() {
                 <CardContent className="space-y-4">
                   <div>
                     <Label htmlFor="address">Delivery Address *</Label>
-                    <Input
+                    <Textarea
                       id="address"
                       value={formData.address}
                       onChange={(e) => handleInputChange("address", e.target.value)}
-                      placeholder="Enter your full delivery address"
+                      placeholder="Enter your full delivery address including landmarks, building name, floor, etc."
                       required
+                      rows={3}
                       data-testid="input-address"
                     />
                   </div>
@@ -749,6 +752,10 @@ export default function CheckoutPage() {
                       <div className="flex items-center space-x-2">
                         <RadioGroupItem value="nairobi-other" id="nairobi-other" data-testid="radio-nairobi-other" />
                         <Label htmlFor="nairobi-other">Other Nairobi Areas (KSh 300)</Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="embu" id="embu" data-testid="radio-embu" />
+                        <Label htmlFor="embu">Embu (Free Delivery)</Label>
                       </div>
                     </RadioGroup>
                   </div>

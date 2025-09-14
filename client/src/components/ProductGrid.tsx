@@ -21,10 +21,48 @@ export default function ProductGrid({
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState("name");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [majorCategoryFilter, setMajorCategoryFilter] = useState("all");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
 
   // Get unique categories
   const categories = Array.from(new Set(products.map(p => p.category)));
+  
+  // Major categories for better filtering
+  const majorCategories = [
+    { value: "all", label: "All Products" },
+    { value: "men", label: "Men's Perfumes" },
+    { value: "women", label: "Women's Perfumes" },
+    { value: "unisex", label: "Unisex Fragrances" }
+  ];
+
+  // Helper function to determine major category
+  const getMajorCategory = (product: Product) => {
+    const name = product.name.toLowerCase();
+    const description = product.description.toLowerCase();
+    const category = product.category.toLowerCase();
+    
+    // Check for men's keywords
+    if (name.includes('men') || name.includes('homme') || name.includes('masculine') ||
+        description.includes('men') || description.includes('homme') || description.includes('masculine') ||
+        category.includes('men') || category.includes('homme') || category.includes('masculine')) {
+      return 'men';
+    }
+    
+    // Check for women's keywords  
+    if (name.includes('women') || name.includes('femme') || name.includes('feminine') ||
+        description.includes('women') || description.includes('femme') || description.includes('feminine') ||
+        category.includes('women') || category.includes('femme') || category.includes('feminine')) {
+      return 'women';
+    }
+    
+    // Check for unisex keywords
+    if (name.includes('unisex') || description.includes('unisex') || category.includes('unisex')) {
+      return 'unisex';
+    }
+    
+    // Default to unisex if no specific gender indicators
+    return 'unisex';
+  };
 
   // Filter and sort products
   const filteredProducts = products
@@ -32,7 +70,8 @@ export default function ProductGrid({
       const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                            product.description.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesCategory = categoryFilter === "all" || product.category === categoryFilter;
-      return matchesSearch && matchesCategory;
+      const matchesMajorCategory = majorCategoryFilter === "all" || getMajorCategory(product) === majorCategoryFilter;
+      return matchesSearch && matchesCategory && matchesMajorCategory;
     })
     .sort((a, b) => {
       switch (sortBy) {
@@ -88,6 +127,21 @@ export default function ProductGrid({
 
           {/* Filters */}
           <div className={`flex flex-col md:flex-row gap-4 ${isFilterOpen ? 'block' : 'hidden md:flex'}`}>
+            {/* Major Categories Filter */}
+            <Select value={majorCategoryFilter} onValueChange={setMajorCategoryFilter}>
+              <SelectTrigger className="w-full md:w-48" data-testid="select-major-category-filter">
+                <SelectValue placeholder="All Products" />
+              </SelectTrigger>
+              <SelectContent>
+                {majorCategories.map(category => (
+                  <SelectItem key={category.value} value={category.value}>
+                    {category.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            
+            {/* Specific Categories Filter */}
             <Select value={categoryFilter} onValueChange={setCategoryFilter}>
               <SelectTrigger className="w-full md:w-48" data-testid="select-category-filter">
                 <SelectValue placeholder="All Categories" />
