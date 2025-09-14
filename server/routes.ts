@@ -1,7 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProductSchema, insertOrderSchema, adminLoginSchema, stripeConfirmPaymentSchema , insertReviewSchema, updateReviewStatusSchema } from "@shared/schema";
+import { insertProductSchema, insertOrderSchema, adminLoginSchema, stripeConfirmPaymentSchema, insertReviewSchema, updateReviewStatusSchema, insertPaymentSchema, updatePaymentSchema } from "@shared/schema";
 import { z } from "zod";
 import Stripe from "stripe";
 import crypto from "crypto";
@@ -554,6 +554,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Restore soft-deleted review (admin only)
+  app.post("/api/admin/reviews/:id/restore", requireAdminAuth, async (req, res) => {
+    try {
+      const reviewId = req.params.id;
+      
+      const review = await storage.getReviewById(reviewId);
+      if (!review) {
+        return res.status(404).json({ error: "Review not found" });
+      }
+      
+      const restoredReview = await storage.restoreReview(reviewId);
+      if (!restoredReview) {
+        return res.status(500).json({ error: "Failed to restore review" });
+      }
+      
+      res.json(restoredReview);
+    } catch (error) {
+      console.error("Error restoring review:", error);
+      res.status(500).json({ error: "Failed to restore review" });
+    }
+  });
+
   // Enhanced GET route for admin reviews with search functionality
   app.get("/api/admin/reviews/search", requireAdminAuth, async (req, res) => {
     try {
@@ -771,6 +793,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching payment analytics:", error);
       res.status(500).json({ error: "Failed to fetch payment analytics" });
+    }
+  });
+
+  // Create payment record (admin only)
+  app.post("/api/admin/payments", requireAdminAuth, async (req, res) => {
+    try {
+      const validatedData = insertPaymentSchema.parse(req.body);
+      
+      const payment = await storage.createPayment(validatedData);
+      res.status(201).json(payment);
+    } catch (error) {
+      console.error("Error creating payment:", error);
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: "Invalid payment data", details: error.errors });
+      } else {
+        res.status(500).json({ error: "Failed to create payment" });
+      }
+    }
+  });
+
+  // Update payment record (admin only)
+  app.put("/api/admin/payments/:id", requireAdminAuth, async (req, res) => {
+    try {
+      const validatedData = updatePaymentSchema.parse(req.body);
+      
+      const payment = await storage.updatePayment(req.params.id, validatedData);
+      if (!payment) {
+        return res.status(404).json({ error: "Payment not found" });
+      }
+      
+      res.json(payment);
+    } catch (error) {
+      console.error("Error updating payment:", error);
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: "Invalid payment data", details: error.errors });
+      } else {
+        res.status(500).json({ error: "Failed to update payment" });
+      }
+    }
+  });
+
+  // Delete payment record (admin only)
+  app.delete("/api/admin/payments/:id", requireAdminAuth, async (req, res) => {
+    try {
+      const deleted = await storage.deletePayment(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Payment not found" });
+      }
+      
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting payment:", error);
+      res.status(500).json({ error: "Failed to delete payment" });
     }
   });
 

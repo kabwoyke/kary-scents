@@ -216,7 +216,7 @@ export default function AdminReviewsPage() {
     },
   });
 
-  // Delete review mutation
+  // Delete review mutation (soft delete)
   const deleteReviewMutation = useMutation({
     mutationFn: async (id: string) => {
       return apiRequest("DELETE", `/api/admin/reviews/${id}`);
@@ -253,14 +253,14 @@ export default function AdminReviewsPage() {
       customerName: review.customerName || "",
       rating: review.rating,
       content: review.content,
-      status: review.status as "pending" | "approved" | "rejected",
+      status: review.status,
     });
     setIsEditDialogOpen(true);
   };
 
-  const handleDelete = (review: Review) => {
-    if (confirm(`Are you sure you want to delete the review by ${review.customerName}?`)) {
-      deleteReviewMutation.mutate(review.id);
+  const handleDelete = (reviewId: string) => {
+    if (confirm("Are you sure you want to delete this review? This action cannot be undone.")) {
+      deleteReviewMutation.mutate(reviewId);
     }
   };
 
@@ -676,9 +676,12 @@ export default function AdminReviewsPage() {
                 key={review.id}
                 review={review}
                 showModerationActions={review.status === "pending"}
+                showAdminActions={true}
                 onApprove={handleApprove}
                 onReject={handleReject}
-                isLoading={updateReviewMutation.isPending}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+                isLoading={updateReviewMutation.isPending || deleteReviewMutation.isPending}
               />
             ))}
           </div>

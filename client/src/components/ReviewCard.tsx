@@ -3,7 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import StarRating from "@/components/StarRating";
 import { formatDistanceToNow } from "date-fns";
-import { CheckCircle, XCircle, Clock, User } from "lucide-react";
+import { CheckCircle, XCircle, Clock, User, Edit, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface Review {
@@ -21,8 +21,11 @@ interface ReviewCardProps {
   review: Review;
   showProduct?: boolean;
   showModerationActions?: boolean;
+  showAdminActions?: boolean;
   onApprove?: (reviewId: string) => void;
   onReject?: (reviewId: string) => void;
+  onEdit?: (review: Review) => void;
+  onDelete?: (reviewId: string) => void;
   isLoading?: boolean;
   className?: string;
 }
@@ -31,8 +34,11 @@ export default function ReviewCard({
   review,
   showProduct = false,
   showModerationActions = false,
+  showAdminActions = false,
   onApprove,
   onReject,
+  onEdit,
+  onDelete,
   isLoading = false,
   className,
 }: ReviewCardProps) {
@@ -120,28 +126,57 @@ export default function ReviewCard({
             {review.content}
           </p>
 
-          {showModerationActions && review.status === "pending" && (
+          {((showModerationActions && review.status === "pending") || showAdminActions) && (
             <div className="flex items-center gap-2 pt-2 border-t">
-              <Button
-                size="sm"
-                onClick={() => onApprove?.(review.id)}
-                disabled={isLoading}
-                className="bg-green-600 hover:bg-green-700 text-white"
-                data-testid={`button-approve-${review.id}`}
-              >
-                <CheckCircle className="w-3 h-3 mr-1" />
-                {isLoading ? "Approving..." : "Approve"}
-              </Button>
-              <Button
-                size="sm"
-                variant="destructive"
-                onClick={() => onReject?.(review.id)}
-                disabled={isLoading}
-                data-testid={`button-reject-${review.id}`}
-              >
-                <XCircle className="w-3 h-3 mr-1" />
-                {isLoading ? "Rejecting..." : "Reject"}
-              </Button>
+              {showModerationActions && review.status === "pending" && (
+                <>
+                  <Button
+                    size="sm"
+                    onClick={() => onApprove?.(review.id)}
+                    disabled={isLoading}
+                    className="bg-green-600 hover:bg-green-700 text-white"
+                    data-testid={`button-approve-${review.id}`}
+                  >
+                    <CheckCircle className="w-3 h-3 mr-1" />
+                    {isLoading ? "Approving..." : "Approve"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => onReject?.(review.id)}
+                    disabled={isLoading}
+                    data-testid={`button-reject-${review.id}`}
+                  >
+                    <XCircle className="w-3 h-3 mr-1" />
+                    {isLoading ? "Rejecting..." : "Reject"}
+                  </Button>
+                </>
+              )}
+              
+              {showAdminActions && (
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onEdit?.(review)}
+                    disabled={isLoading}
+                    data-testid={`button-edit-${review.id}`}
+                  >
+                    <Edit className="w-3 h-3 mr-1" />
+                    Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => onDelete?.(review.id)}
+                    disabled={isLoading}
+                    data-testid={`button-delete-${review.id}`}
+                  >
+                    <Trash2 className="w-3 h-3 mr-1" />
+                    Delete
+                  </Button>
+                </>
+              )}
             </div>
           )}
         </div>

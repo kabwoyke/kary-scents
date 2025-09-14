@@ -74,11 +74,14 @@ export const reviews = pgTable("reviews", {
   customerPhoneHash: text("customer_phone_hash"),
   orderId: varchar("order_id").references(() => orders.id, { onDelete: "set null" }),
   status: text("status").notNull().default("pending"), // 'pending' | 'approved' | 'rejected'
+  deletedAt: timestamp("deleted_at"), // For soft deletes
   createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => {
   return {
     productStatusIdx: index("reviews_product_status_idx").on(table.productId, table.status),
     orderIdx: index("reviews_order_idx").on(table.orderId),
+    deletedAtIdx: index("reviews_deleted_at_idx").on(table.deletedAt),
   };
 });
 

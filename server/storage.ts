@@ -70,9 +70,10 @@ export interface IStorage {
   getReviewById(id: string): Promise<Review | undefined>;
   updateReview(id: string, updates: Partial<InsertReview>): Promise<Review | undefined>;
   updateReviewStatus(id: string, status: UpdateReviewStatus): Promise<Review | undefined>;
-  deleteReview(id: string): Promise<boolean>;
+  deleteReview(id: string): Promise<boolean>; // Soft delete
+  restoreReview(id: string): Promise<Review | undefined>; // Restore soft deleted review
   getAllPendingReviews(limit?: number, offset?: number): Promise<{ reviews: Review[]; total: number }>;
-  getAllReviews(status?: string, limit?: number, offset?: number): Promise<{ reviews: Review[]; total: number }>;
+  getAllReviews(status?: string, limit?: number, offset?: number, includeDeleted?: boolean): Promise<{ reviews: Review[]; total: number }>;
   searchReviews(searchQuery: string, status?: string, limit?: number, offset?: number): Promise<{ reviews: Review[]; total: number }>;
   getProductAverageRating(productId: string): Promise<number>;
   
@@ -83,6 +84,7 @@ export interface IStorage {
   getPaymentByTransactionId(transactionId: string): Promise<Payment | undefined>;
   getPaymentByMpesaCheckoutId(checkoutRequestId: string): Promise<Payment | undefined>;
   updatePayment(id: string, updates: UpdatePayment): Promise<Payment | undefined>;
+  deletePayment(id: string): Promise<boolean>;
   getAllPayments(limit?: number, offset?: number): Promise<{ payments: Payment[]; total: number }>;
   getPaymentsByStatus(status: string, limit?: number, offset?: number): Promise<{ payments: Payment[]; total: number }>;
   getPaymentsByMethod(method: 'stripe' | 'mpesa', limit?: number, offset?: number): Promise<{ payments: Payment[]; total: number }>;
@@ -206,7 +208,7 @@ export class DatabaseStorage implements IStorage {
       // Then delete the order
       const result = await tx.delete(orders).where(eq(orders.id, id));
       
-      return result.rowCount > 0;
+      return (result.rowCount ?? 0) > 0;
     });
   }
 
@@ -326,13 +328,17 @@ export class DatabaseStorage implements IStorage {
       return await db.select().from(reviews)
         .where(and(
           eq(reviews.productId, productId),
-          eq(reviews.status, status as any)
+          eq(reviews.status, status as any),
+          sql`${reviews.deletedAt} IS NULL` // Exclude soft deleted reviews
         ))
         .orderBy(desc(reviews.createdAt));
     }
     
     return await db.select().from(reviews)
-      .where(eq(reviews.productId, productId))
+      .where(and(
+        eq(reviews.productId, productId),
+        sql`${reviews.deletedAt} IS NULL` // Exclude soft deleted reviews
+      ))
       .orderBy(desc(reviews.createdAt));
   }
 
@@ -382,29 +388,22 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async getAllReviews(status?: string, limit: number = 50, offset: number = 0): Promise<{ reviews: Review[]; total: number }> {
+  async getAllReviews(status?: string, limit: number = 50, offset: number = 0, includeDeleted: boolean = false): Promise<{ reviews: Review[]; total: number }> {
+    let whereCondition = includeDeleted ? sql`true` : sql`${reviews.deletedAt} IS NULL`;
+    
     if (status) {
-      const [reviewsResult, totalResult] = await Promise.all([
-        db.select().from(reviews)
-          .where(eq(reviews.status, status as any))
-          .orderBy(desc(reviews.createdAt))
-          .limit(limit)
-          .offset(offset),
-        db.select({ count: count() }).from(reviews).where(eq(reviews.status, status as any))
-      ]);
-      
-      return {
-        reviews: reviewsResult,
-        total: totalResult[0].count
-      };
+      whereCondition = includeDeleted 
+        ? eq(reviews.status, status as any)
+        : and(eq(reviews.status, status as any), sql`${reviews.deletedAt} IS NULL`) || sql`false`;
     }
     
     const [reviewsResult, totalResult] = await Promise.all([
       db.select().from(reviews)
+        .where(whereCondition)
         .orderBy(desc(reviews.createdAt))
         .limit(limit)
         .offset(offset),
-      db.select({ count: count() }).from(reviews)
+      db.select({ count: count() }).from(reviews).where(whereCondition)
     ]);
     
     return {
@@ -435,14 +434,31 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteReview(id: string): Promise<boolean> {
-    const result = await db.delete(reviews).where(eq(reviews.id, id));
+    // Soft delete: set deletedAt timestamp instead of removing record
+    const result = await db
+      .update(reviews)
+      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .where(eq(reviews.id, id));
     return (result as any).rowCount > 0;
   }
 
+  async restoreReview(id: string): Promise<Review | undefined> {
+    // Restore soft deleted review by setting deletedAt to null
+    const result = await db
+      .update(reviews)
+      .set({ deletedAt: null, updatedAt: new Date() })
+      .where(eq(reviews.id, id))
+      .returning();
+    return result[0];
+  }
+
   async searchReviews(searchQuery: string, status?: string, limit: number = 50, offset: number = 0): Promise<{ reviews: Review[]; total: number }> {
-    let whereCondition = or(
-      ilike(reviews.customerName, `%${searchQuery}%`),
-      ilike(reviews.comment, `%${searchQuery}%`)
+    let whereCondition = and(
+      or(
+        ilike(reviews.customerName, `%${searchQuery}%`),
+        ilike(reviews.content, `%${searchQuery}%`)
+      ),
+      sql`${reviews.deletedAt} IS NULL` // Exclude soft deleted reviews
     );
     
     if (status) {
@@ -651,6 +667,11 @@ export class DatabaseStorage implements IStorage {
       .where(eq(payments.id, id))
       .returning();
     return result[0];
+  }
+
+  async deletePayment(id: string): Promise<boolean> {
+    const result = await db.delete(payments).where(eq(payments.id, id));
+    return (result as any).rowCount > 0;
   }
 
   async getAllPayments(limit = 50, offset = 0): Promise<{ payments: Payment[]; total: number }> {

@@ -37,7 +37,7 @@ interface Payment {
   orderId: string;
   paymentMethod: 'stripe' | 'mpesa';
   amount: number;
-  status: 'pending' | 'completed' | 'failed';
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'refunded';
   transactionId: string | null;
   processingFee: number | null;
   createdAt: string;
@@ -60,7 +60,7 @@ const paymentSchema = z.object({
     required_error: "Please select a payment method",
   }),
   amount: z.number().min(1, "Amount must be greater than 0"),
-  status: z.enum(["pending", "completed", "failed"]),
+  status: z.enum(["pending", "processing", "completed", "failed", "cancelled", "refunded"]),
   transactionId: z.string().optional(),
   processingFee: z.number().min(0).optional(),
 });
@@ -270,6 +270,12 @@ export default function PaymentsPage() {
         return <Badge variant="destructive">Failed</Badge>;
       case 'pending':
         return <Badge variant="secondary">Pending</Badge>;
+      case 'processing':
+        return <Badge variant="secondary" className="bg-blue-100 text-blue-800">Processing</Badge>;
+      case 'cancelled':
+        return <Badge variant="outline">Cancelled</Badge>;
+      case 'refunded':
+        return <Badge variant="outline" className="bg-orange-100 text-orange-800">Refunded</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
     }
@@ -407,8 +413,11 @@ export default function PaymentsPage() {
                             </FormControl>
                             <SelectContent>
                               <SelectItem value="pending">Pending</SelectItem>
+                              <SelectItem value="processing">Processing</SelectItem>
                               <SelectItem value="completed">Completed</SelectItem>
                               <SelectItem value="failed">Failed</SelectItem>
+                              <SelectItem value="cancelled">Cancelled</SelectItem>
+                              <SelectItem value="refunded">Refunded</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />
@@ -600,8 +609,11 @@ export default function PaymentsPage() {
                 <SelectContent>
                   <SelectItem value="all">All Status</SelectItem>
                   <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="processing">Processing</SelectItem>
                   <SelectItem value="completed">Completed</SelectItem>
                   <SelectItem value="failed">Failed</SelectItem>
+                  <SelectItem value="cancelled">Cancelled</SelectItem>
+                  <SelectItem value="refunded">Refunded</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -826,8 +838,11 @@ export default function PaymentsPage() {
                         </FormControl>
                         <SelectContent>
                           <SelectItem value="pending">Pending</SelectItem>
+                          <SelectItem value="processing">Processing</SelectItem>
                           <SelectItem value="completed">Completed</SelectItem>
                           <SelectItem value="failed">Failed</SelectItem>
+                          <SelectItem value="cancelled">Cancelled</SelectItem>
+                          <SelectItem value="refunded">Refunded</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />
