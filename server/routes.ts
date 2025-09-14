@@ -1786,6 +1786,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Extract auth token from headers
       const authToken = req.headers['x-mpesa-auth-token'] as string;
 
+      // Check if callback processing is configured (supports development mode)
+      if (!mpesaService.isCallbackProcessingConfigured()) {
+        console.error("M-Pesa callback processing not configured");
+        return res.status(503).json({ error: "M-Pesa service not configured" });
+      }
+
       // Validate callback structure and authentication
       if (!mpesaService.validateCallback(req.body, authToken)) {
         console.error("Invalid callback structure or authentication:", {
@@ -1966,6 +1972,100 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Development helper endpoint to simulate M-Pesa callback
+  app.post("/api/payments/mpesa/simulate-callback", async (req, res) => {
+    // Only allow in development mode
+    if (!mpesaService.isDevelopmentMode()) {
+      return res.status(403).json({ 
+        error: "Test endpoint only available in development mode" 
+      });
+    }
+
+    try {
+      const { orderId, resultCode = 0, mpesaReceiptNumber } = req.body;
+      
+      if (!orderId) {
+        return res.status(400).json({ error: "Order ID is required" });
+      }
+
+      // Find the order and get its checkout request ID
+      const order = await storage.getOrder(orderId);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+
+      if (order.paymentMethod !== 'mpesa') {
+        return res.status(400).json({ error: "Order is not an M-Pesa payment" });
+      }
+
+      if (!order.mpesaCheckoutRequestId) {
+        return res.status(400).json({ error: "Order does not have a checkout request ID" });
+      }
+
+      // Generate a test receipt number if not provided
+      const testReceiptNumber = mpesaReceiptNumber || `TEST${Date.now()}${Math.floor(Math.random() * 1000)}`;
+      
+      // Create mock callback structure matching the user-provided format
+      const mockCallbackData = {
+        Body: {
+          stkCallback: {
+            MerchantRequestID: `TEST-${Date.now()}`,
+            CheckoutRequestID: order.mpesaCheckoutRequestId,
+            ResultCode: resultCode,
+            ResultDesc: resultCode === 0 ? "The service request is processed successfully." :
+                       resultCode === 1032 ? "Request cancelled by user" :
+                       "Transaction failed",
+            ...(resultCode === 0 && {
+              CallbackMetadata: {
+                Item: [
+                  { Name: "Amount", Value: order.total / 100 }, // Convert from cents to KSh
+                  { Name: "MpesaReceiptNumber", Value: testReceiptNumber },
+                  { Name: "TransactionDate", Value: parseInt(new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14)) },
+                  { Name: "PhoneNumber", Value: order.mpesaPhone ? parseInt(order.mpesaPhone.replace(/^\+/, '')) : 254700000000 }
+                ]
+              }
+            })
+          }
+        }
+      };
+
+      // Call the actual callback endpoint internally
+      const callbackResponse = await fetch(`http://localhost:${process.env.PORT || 5000}/api/payments/mpesa/callback`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(mockCallbackData)
+      });
+
+      if (!callbackResponse.ok) {
+        const errorData = await callbackResponse.json();
+        throw new Error(`Callback processing failed: ${errorData.error || 'Unknown error'}`);
+      }
+
+      const callbackResult = await callbackResponse.json();
+      
+      // Return success response
+      res.json({
+        success: true,
+        message: `Test callback processed successfully for order ${orderId}`,
+        orderId: orderId,
+        checkoutRequestID: order.mpesaCheckoutRequestId,
+        simulatedResultCode: resultCode,
+        simulatedReceiptNumber: testReceiptNumber,
+        callbackResult: callbackResult,
+        note: "This is a development test - not a real M-Pesa transaction"
+      });
+
+    } catch (error: any) {
+      console.error("Error simulating M-Pesa callback:", error);
+      res.status(500).json({
+        error: "Failed to simulate callback",
+        details: error.message
+      });
+    }
+  });
+
   app.get("/api/orders/:id/payment-status", async (req, res) => {
     try {
       const order = await storage.getOrder(req.params.id);
@@ -1978,8 +2078,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         order.paymentMethod === 'mpesa' && 
         order.mpesaStatus === 'initiated' && 
         order.mpesaCheckoutRequestId &&
-        mpesaService.isConfigured()
+        mpesaService.isStatusPollingConfigured()
       ) {
+        // In development mode without full M-Pesa config, skip API queries and rely on database status
+        if (mpesaService.isDevelopmentMode() && !mpesaService.isConfigured()) {
+          console.log(`Development mode: skipping M-Pesa API query for order ${order.id}, relying on database status`);
+          
+          // Return current status (will be updated by callback simulation or manual testing)
+          return res.json({
+            orderId: order.id,
+            status: order.status,
+            paymentMethod: order.paymentMethod,
+            mpesaStatus: order.mpesaStatus,
+            paidAt: order.paidAt,
+            mpesaReceiptNumber: order.mpesaReceiptNumber,
+            total: order.total / 100,
+            realTimeUpdate: false,
+            developmentMode: true,
+            note: 'Development mode - use test callback endpoint to simulate payment completion'
+          });
+        }
         try {
           // Generate credentials for STK query
           const timestamp = mpesaService.generateTimestamp();

@@ -51,7 +51,15 @@ export class MpesaService {
   }
 
   /**
-   * Check if Mpesa is properly configured
+   * Check if we're in development mode
+   */
+  isDevelopmentMode(): boolean {
+    return process.env.NODE_ENV !== 'production' && 
+           process.env.MPESA_ENVIRONMENT !== 'production';
+  }
+
+  /**
+   * Check if Mpesa is properly configured for full operations
    */
   isConfigured(): boolean {
     return !!(
@@ -61,6 +69,32 @@ export class MpesaService {
       this.config.passKey &&
       this.config.callbackUrl
     );
+  }
+
+  /**
+   * Check if Mpesa callback processing can work (allows development mode)
+   */
+  isCallbackProcessingConfigured(): boolean {
+    // In development mode, we can process callbacks with minimal config
+    if (this.isDevelopmentMode()) {
+      return true; // Allow callback processing in development
+    }
+    
+    // In production, require full configuration
+    return this.isConfigured();
+  }
+
+  /**
+   * Check if status polling can work (allows development with fallback)
+   */
+  isStatusPollingConfigured(): boolean {
+    // In development, we rely on database status rather than M-Pesa API
+    if (this.isDevelopmentMode()) {
+      return true; // Allow status polling in development (will use database status)
+    }
+    
+    // In production, require full configuration for M-Pesa API queries
+    return this.isConfigured();
   }
 
   /**
@@ -433,6 +467,7 @@ export class MpesaService {
   validateCallback(callbackData: any, authToken?: string): boolean {
     // Basic validation - ensure required fields are present
     if (!callbackData.Body || !callbackData.Body.stkCallback) {
+      console.warn('Callback validation failed: missing Body.stkCallback structure');
       return false;
     }
 
@@ -444,7 +479,18 @@ export class MpesaService {
     );
 
     if (!hasRequiredFields) {
+      console.warn('Callback validation failed: missing required fields', {
+        hasMerchantRequestID: !!callback.MerchantRequestID,
+        hasCheckoutRequestID: !!callback.CheckoutRequestID,
+        hasResultCode: callback.ResultCode !== undefined
+      });
       return false;
+    }
+
+    // In development mode, skip auth token validation
+    if (this.isDevelopmentMode()) {
+      console.log('Development mode: skipping auth token validation');
+      return true;
     }
 
     // If auth token is provided, validate it
@@ -452,7 +498,7 @@ export class MpesaService {
       return this.validateCallbackAuth(callback.CheckoutRequestID, authToken);
     }
 
-    // If no auth token provided, still validate structure
+    // If no auth token provided, still validate structure (production mode)
     return true;
   }
 
