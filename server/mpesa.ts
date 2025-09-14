@@ -64,6 +64,13 @@ export class MpesaService {
   }
 
   /**
+   * Get business short code for public access
+   */
+  getBusinessShortCode(): string {
+    return this.config.businessShortCode;
+  }
+
+  /**
    * Generate OAuth access token
    */
   async getAccessToken(): Promise<string> {

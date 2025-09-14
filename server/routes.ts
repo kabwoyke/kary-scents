@@ -1695,6 +1695,91 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Order not found" });
       }
 
+      // For M-Pesa payments that are still pending, query real-time status
+      if (
+        order.paymentMethod === 'mpesa' && 
+        order.mpesaStatus === 'initiated' && 
+        order.mpesaCheckoutRequestId &&
+        mpesaService.isConfigured()
+      ) {
+        try {
+          // Generate credentials for STK query
+          const timestamp = mpesaService.generateTimestamp();
+          const password = mpesaService.generatePassword(timestamp);
+
+          // Query M-Pesa for real-time status
+          const statusResult = await mpesaService.querySTKStatus({
+            businessShortCode: mpesaService.getBusinessShortCode(),
+            password: password,
+            timestamp: timestamp,
+            checkoutRequestID: order.mpesaCheckoutRequestId,
+          });
+
+          console.log(`Real-time M-Pesa status for order ${order.id}:`, statusResult);
+
+          // Update order status based on M-Pesa response
+          let updatedOrder = order;
+          if (statusResult.resultCode === '0') {
+            // Payment successful
+            await storage.updateOrderMpesaDetails(order.id, {
+              mpesaStatus: 'paid',
+              paidAt: new Date(),
+              mpesaReceiptNumber: 'Auto-detected', // M-Pesa doesn't provide receipt in query response
+            });
+            const fetchedOrder = await storage.getOrder(req.params.id);
+            if (fetchedOrder) {
+              updatedOrder = fetchedOrder;
+            }
+            console.log(`Order ${order.id} marked as paid via real-time query`);
+
+          } else if (statusResult.resultCode === '1032') {
+            // User cancelled transaction
+            await storage.updateOrderMpesaDetails(order.id, {
+              mpesaStatus: 'cancelled',
+            });
+            const fetchedOrder = await storage.getOrder(req.params.id);
+            if (fetchedOrder) {
+              updatedOrder = fetchedOrder;
+            }
+            console.log(`Order ${order.id} marked as cancelled via real-time query`);
+
+          } else if (
+            statusResult.resultCode === '1037' || // Invalid transaction
+            statusResult.resultCode === '1001' || // Invalid transaction
+            statusResult.resultCode === '9999'    // Request timeout or other error
+          ) {
+            // Transaction failed
+            await storage.updateOrderMpesaDetails(order.id, {
+              mpesaStatus: 'failed',
+            });
+            const fetchedOrder = await storage.getOrder(req.params.id);
+            if (fetchedOrder) {
+              updatedOrder = fetchedOrder;
+            }
+            console.log(`Order ${order.id} marked as failed via real-time query. Result: ${statusResult.resultDesc}`);
+          }
+          // For other result codes (like 1037 pending), keep current status
+
+          // Return updated status
+          return res.json({
+            orderId: updatedOrder.id,
+            status: updatedOrder.status,
+            paymentMethod: updatedOrder.paymentMethod,
+            mpesaStatus: updatedOrder.mpesaStatus,
+            paidAt: updatedOrder.paidAt,
+            mpesaReceiptNumber: updatedOrder.mpesaReceiptNumber,
+            total: updatedOrder.total / 100, // Convert back to KSh
+            realTimeUpdate: true, // Flag to indicate this was updated via real-time query
+          });
+
+        } catch (queryError: any) {
+          // If M-Pesa query fails, fall back to stored status but log the error
+          console.warn(`Failed to query M-Pesa status for order ${order.id}:`, queryError.message);
+          // Continue with stored status below
+        }
+      }
+
+      // Return stored status (fallback or for non-M-Pesa payments)
       res.json({
         orderId: order.id,
         status: order.status,
@@ -1703,6 +1788,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         paidAt: order.paidAt,
         mpesaReceiptNumber: order.mpesaReceiptNumber,
         total: order.total / 100, // Convert back to KSh
+        realTimeUpdate: false, // Flag to indicate this was from stored data
       });
     } catch (error: any) {
       console.error("Error fetching payment status:", error);
