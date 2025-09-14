@@ -7,6 +7,8 @@ import Stripe from "stripe";
 import crypto from "crypto";
 import { mpesaService } from "./mpesa";
 import { sendOrderReceiptEmail } from "./email";
+import multer from "multer";
+import { v2 as cloudinary } from "cloudinary";
 
 // Simple in-memory rate limiting for review submissions
 interface RateLimitEntry {
@@ -140,6 +142,82 @@ if (process.env.STRIPE_SECRET_KEY) {
   stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 }
 
+// Initialize Cloudinary - will handle missing CLOUDINARY_URL
+if (process.env.CLOUDINARY_URL) {
+  cloudinary.config({
+    secure: true // Use HTTPS URLs
+  });
+} else {
+  console.warn("CLOUDINARY_URL not configured - image upload will not work");
+}
+
+// Multer configuration for image uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+    files: 1 // Only allow 1 file upload at a time
+  },
+  fileFilter: (req, file, cb) => {
+    // Only allow image files
+    const allowedTypes = [
+      'image/jpeg',
+      'image/png', 
+      'image/webp',
+      'image/avif',
+      'image/heic'
+    ];
+    
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Invalid file type. Only ${allowedTypes.map(t => t.split('/')[1].toUpperCase()).join(', ')} files are allowed.`));
+    }
+  }
+});
+
+// Multer error handling middleware
+function handleMulterError(error: any, req: Request, res: Response, next: NextFunction) {
+  if (error instanceof multer.MulterError) {
+    console.error('Multer error:', error);
+    
+    switch (error.code) {
+      case 'LIMIT_FILE_SIZE':
+        return res.status(413).json({
+          error: "File too large",
+          message: "Please upload an image smaller than 5MB"
+        });
+      case 'LIMIT_FILE_COUNT':
+        return res.status(400).json({
+          error: "Too many files",
+          message: "Only one file can be uploaded at a time"
+        });
+      case 'LIMIT_UNEXPECTED_FILE':
+        return res.status(400).json({
+          error: "Unexpected file field",
+          message: "Please use the 'image' field for file upload"
+        });
+      default:
+        return res.status(400).json({
+          error: "Upload error",
+          message: error.message || "File upload failed"
+        });
+    }
+  }
+  
+  // Handle custom file filter errors
+  if (error && error.message && error.message.includes('Invalid file type')) {
+    console.error('File type validation error:', error);
+    return res.status(400).json({
+      error: "Invalid file type",
+      message: error.message
+    });
+  }
+  
+  // Pass through other errors
+  next(error);
+}
+
 // Admin middleware
 async function requireAdminAuth(req: Request, res: Response, next: NextFunction) {
   try {
@@ -246,6 +324,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Admin me error:", error);
       res.status(500).json({ error: "Failed to get admin info" });
+    }
+  });
+
+  // Admin image upload endpoint
+  app.post("/api/admin/uploads/image", requireAdminAuth, upload.single('image'), handleMulterError, async (req: Request, res: Response) => {
+    try {
+      if (!process.env.CLOUDINARY_URL) {
+        return res.status(500).json({ 
+          error: "Image upload service not configured",
+          message: "CLOUDINARY_URL environment variable is missing" 
+        });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ 
+          error: "No file uploaded",
+          message: "Please select an image file to upload" 
+        });
+      }
+
+      // Upload to Cloudinary using upload_stream for memory buffer
+      const uploadPromise = new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream(
+          {
+            folder: "kary-perfumes/products",
+            transformation: [
+              { fetch_format: "auto", quality: "auto" },
+              { width: 800, height: 800, crop: "limit" }
+            ],
+            unique_filename: true,
+            use_filename: true,
+            filename_override: `product_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+          },
+          (error, result) => {
+            if (error) {
+              console.error("Cloudinary upload error:", error);
+              reject(error);
+            } else {
+              resolve(result);
+            }
+          }
+        );
+        
+        uploadStream.end(req.file!.buffer);
+      });
+
+      const result = await uploadPromise as any;
+
+      // Return structured response
+      res.json({
+        url: result.secure_url,
+        publicId: result.public_id,
+        width: result.width,
+        height: result.height,
+        bytes: result.bytes,
+        format: result.format
+      });
+
+    } catch (error: any) {
+      console.error("Image upload error:", error);
+      
+      // Handle specific Cloudinary errors
+      if (error.http_code === 413) {
+        return res.status(413).json({ 
+          error: "File too large",
+          message: "Please upload an image smaller than 5MB" 
+        });
+      }
+      
+      if (error.message && error.message.includes("Invalid file type")) {
+        return res.status(400).json({ 
+          error: "Invalid file type",
+          message: error.message 
+        });
+      }
+      
+      res.status(500).json({ 
+        error: "Upload failed",
+        message: "Failed to upload image. Please try again." 
+      });
     }
   });
 

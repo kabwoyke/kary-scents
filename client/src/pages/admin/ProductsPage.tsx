@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import ImageUploader from "@/components/ImageUploader";
 import { 
   Plus, 
   Edit, 
@@ -362,12 +363,12 @@ export default function AdminProductsPage() {
                       name="image"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Image URL</FormLabel>
+                          <FormLabel>Product Image</FormLabel>
                           <FormControl>
-                            <Input 
-                              placeholder="https://example.com/image.jpg" 
-                              data-testid="input-product-image"
-                              {...field} 
+                            <ImageUploader
+                              value={field.value}
+                              onChange={field.onChange}
+                              disabled={createProductMutation.isPending || updateProductMutation.isPending}
                             />
                           </FormControl>
                           <FormMessage />
