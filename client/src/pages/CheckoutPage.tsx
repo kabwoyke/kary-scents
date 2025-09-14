@@ -22,7 +22,7 @@ interface CheckoutFormData {
   email: string;
   phone: string;
   address: string;
-  deliveryLocation: "nairobi-cbd" | "nairobi-other" | "embu";
+  deliveryLocation: "embu" | "nairobi-cbd" | "nairobi-other";
   paymentMethod: "stripe" | "mpesa";
   mpesaPhone: string;
 }
@@ -127,7 +127,7 @@ export default function CheckoutPage() {
     email: "",
     phone: "",
     address: "",
-    deliveryLocation: "nairobi-cbd",
+    deliveryLocation: "embu",
     paymentMethod: "stripe",
     mpesaPhone: "",
   });
@@ -172,6 +172,8 @@ export default function CheckoutPage() {
     retryDelay: attemptIndex => Math.min(1000 * 2 ** attemptIndex, 30000),
   });
 
+
+  // console.log("check" , data)
   // Check for payment timeout
   useEffect(() => {
     if (paymentStartTime && isWaitingForPayment) {
@@ -749,6 +751,11 @@ export default function CheckoutPage() {
                       onValueChange={(value) => handleInputChange("deliveryLocation", value)}
                       className="mt-2"
                     >
+
+                        <div className="flex items-center space-x-2">
+                        <RadioGroupItem  value="embu"  id="embu" data-testid="radio-embu" />
+                        <Label htmlFor="embu">Embu (Free Delivery)</Label>
+                      </div>
                       <div className="flex items-center space-x-2">
                         <RadioGroupItem value="nairobi-cbd" id="nairobi-cbd" data-testid="radio-nairobi-cbd" />
                         <Label htmlFor="nairobi-cbd">Nairobi CBD (KSh 200)</Label>
@@ -757,10 +764,7 @@ export default function CheckoutPage() {
                         <RadioGroupItem value="nairobi-other" id="nairobi-other" data-testid="radio-nairobi-other" />
                         <Label htmlFor="nairobi-other">Other Nairobi Areas (KSh 300)</Label>
                       </div>
-                      <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="embu" id="embu" data-testid="radio-embu" />
-                        <Label htmlFor="embu">Embu (Free Delivery)</Label>
-                      </div>
+                    
                     </RadioGroup>
                   </div>
                 </CardContent>

@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import * as dotenv from "dotenv";
+import moment from "moment"
 
 dotenv.config();
 
@@ -34,7 +35,7 @@ export class MpesaService {
     this.config = {
       consumerKey: process.env.MPESA_CONSUMER_KEY || '',
       consumerSecret: process.env.MPESA_CONSUMER_SECRET || '',
-      businessShortCode: process.env.MPESA_BUSINESS_SHORTCODE || '',
+      businessShortCode: process.env.MPESA_BUSINESS_SHORTCODE || '4156641',
       passKey: process.env.MPESA_PASSKEY || '',
       callbackUrl: process.env.MPESA_CALLBACK_URL || '',
       baseUrl,
@@ -101,7 +102,7 @@ export class MpesaService {
    * Get business short code for public access
    */
   getBusinessShortCode(): string {
-    return this.config.businessShortCode;
+    return "4156641";
   }
 
   /**
@@ -184,13 +185,8 @@ export class MpesaService {
    * Generate timestamp in the format required by Mpesa
    */
   generateTimestamp(): string {
-    const now = new Date();
-    return now.getFullYear().toString() +
-           (now.getMonth() + 1).toString().padStart(2, '0') +
-           now.getDate().toString().padStart(2, '0') +
-           now.getHours().toString().padStart(2, '0') +
-           now.getMinutes().toString().padStart(2, '0') +
-           now.getSeconds().toString().padStart(2, '0');
+    
+    return moment().format("YYYYMMDDHHmmss");
   }
 
   /**

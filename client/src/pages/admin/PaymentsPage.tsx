@@ -38,7 +38,7 @@ interface Payment {
   paymentMethod: 'stripe' | 'mpesa';
   amount: number;
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'refunded';
-  transactionId: string | null;
+  receipt_number: string | null;
   processingFee: number | null;
   createdAt: string;
   updatedAt: string;
@@ -56,6 +56,7 @@ interface PaymentAnalytics {
 
 const paymentSchema = z.object({
   orderId: z.string().min(1, "Order ID is required"),
+  receipt_number:z.string(),
   paymentMethod: z.enum(["stripe", "mpesa"], {
     required_error: "Please select a payment method",
   }),
@@ -86,7 +87,7 @@ export default function PaymentsPage() {
       paymentMethod: "stripe",
       amount: 0,
       status: "pending",
-      transactionId: "",
+      receipt_number: "",
       processingFee: 0,
     },
   });
@@ -228,7 +229,7 @@ export default function PaymentsPage() {
       paymentMethod: payment.paymentMethod,
       amount: payment.amount,
       status: payment.status,
-      transactionId: payment.transactionId || "",
+      transactionId: payment.receipt_number || "",
       processingFee: payment.processingFee || 0,
     });
     setIsEditDialogOpen(true);
@@ -679,7 +680,7 @@ export default function PaymentsPage() {
                             </div>
                           </TableCell>
                           <TableCell className="font-mono text-sm">
-                            {payment.transactionId || '-'}
+                            {payment.receipt_number || '-'}
                           </TableCell>
                           <TableCell>
                             {payment.processingFee ? formatCurrency(payment.processingFee) : '-'}

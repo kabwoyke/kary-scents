@@ -1770,303 +1770,396 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/payments/mpesa/callback", async (req, res) => {
-    const startTime = Date.now();
-    let orderFound = false;
-    let callbackProcessed = false;
+app.post("/api/payments/mpesa/callback", async (req, res) => {
+  try {
+    console.log("M-Pesa callback received");
     
-    try {
-      // Security: Mpesa callback received (sensitive data not logged)
-      console.log("Mpesa callback received:", {
-        hasBody: !!req.body,
-        checkoutRequestId: req.body?.Body?.stkCallback?.CheckoutRequestID ? "[PRESENT]" : "[MISSING]",
-        resultCode: req.body?.Body?.stkCallback?.ResultCode
-      });
+    // Extract callback data
+    const stkCallback = req.body?.Body?.stkCallback;
+    if (!stkCallback) {
+      console.error("Invalid callback structure");
+      return res.status(200).json({ status: "OK" }); // Always return 200 to M-Pesa
+    }
 
-      // Extract auth token from headers
-      const authToken = req.headers['x-mpesa-auth-token'] as string;
+    const {
+      CheckoutRequestID,
+      ResultCode,
+      ResultDesc
+    } = stkCallback;
 
-      // Check if callback processing is configured (supports development mode)
-      if (!mpesaService.isCallbackProcessingConfigured()) {
-        console.error("M-Pesa callback processing not configured");
-        return res.status(503).json({ error: "M-Pesa service not configured" });
-      }
+    // Extract payment details if successful
+    let mpesaReceiptNumber = null;
+    let phoneNumber = null;
+    let amount = null;
+    
+    if (ResultCode === 0 && stkCallback.CallbackMetadata?.Item) {
+      const items = stkCallback.CallbackMetadata.Item;
+      // @ts-ignore
+      mpesaReceiptNumber = items.find(item => item.Name === "MpesaReceiptNumber")?.Value;
+       // @ts-ignore
+      phoneNumber = items.find(item => item.Name === "PhoneNumber")?.Value;
+       // @ts-ignore
+      amount = items.find(item => item.Name === "Amount")?.Value;
+    }
 
-      // Validate callback structure and authentication
-      if (!mpesaService.validateCallback(req.body, authToken)) {
-        console.error("Invalid callback structure or authentication:", {
-          body: req.body,
-          hasAuth: !!authToken,
-          headers: req.headers
-        });
-        return res.status(400).json({ error: "Invalid callback structure or authentication" });
-      }
+    console.log("Callback details:", {
+      checkoutRequestID: CheckoutRequestID,
+      resultCode: ResultCode,
+      resultDesc: ResultDesc,
+      receipt: mpesaReceiptNumber
+    });
 
-      // Extract callback details
-      const callbackDetails = mpesaService.extractCallbackDetails(req.body);
+    // Find the order
+    const order = await storage.getOrderByCheckoutRequestId(CheckoutRequestID);
+    if (!order) {
+      console.error("Order not found:", CheckoutRequestID);
+      return res.status(200).json({ status: "OK" });
+    }
+
+    console.log("Order found:", {
+      orderId: order.id,
+      mpesaStatus: order.mpesaStatus,
+      checkoutRequestId: order.mpesaCheckoutRequestId
+    });
+
+    // Find the payment record
+    const payment = await storage.getPaymentByMpesaCheckoutId(CheckoutRequestID);
+    if (!payment) {
+      console.error("Payment record not found for CheckoutRequestID:", CheckoutRequestID);
       
-      // Store raw callback for audit
-      console.log("Callback details extracted:", {
-        checkoutRequestID: callbackDetails.checkoutRequestID,
-        resultCode: callbackDetails.resultCode,
-        resultDesc: callbackDetails.resultDesc,
-        amount: callbackDetails.amount,
-        receipt: callbackDetails.mpesaReceiptNumber
+      // Debug: Check if we have any payments for this order
+      const orderPayments = await storage.getPaymentsByOrder(order.id);
+      console.log("All payments for this order:", orderPayments.map(p => ({
+        id: p.id,
+        status: p.status,
+        mpesaCheckoutRequestId: p.mpesaCheckoutRequestId,
+        transactionId: p.transactionId
+      })));
+
+      console.log("Proceeding to update order without payment record");
+    } else {
+      console.log("Payment found:", {
+        paymentId: payment.id,
+        status: payment.status,
+        mpesaCheckoutRequestId: payment.mpesaCheckoutRequestId
       });
+    }
 
-      // Find order by CheckoutRequestID
-      const order = await storage.getOrderByCheckoutRequestId(
-        callbackDetails.checkoutRequestID
-      );
-
-      if (!order) {
-        console.error("Order not found for CheckoutRequestID:", callbackDetails.checkoutRequestID);
-        return res.status(404).json({ error: "Order not found" });
-      }
-      
-      orderFound = true;
-
-      // Find payment record by CheckoutRequestID
-      const payment = await storage.getPaymentByMpesaCheckoutId(
-        callbackDetails.checkoutRequestID
-      );
-
-      if (!payment) {
-        console.error("Payment record not found for CheckoutRequestID:", callbackDetails.checkoutRequestID);
-        return res.status(404).json({ error: "Payment record not found" });
-      }
-
-      // Idempotent processing - only allow certain status transitions
-      if (payment.status === 'completed') {
-        console.log("Payment already processed as completed:", payment.id);
-        callbackProcessed = true;
-        return res.json({ status: "OK", message: "Already processed" });
-      }
-
-      if (order.mpesaStatus === 'failed' && callbackDetails.resultCode === 0) {
-        console.warn("Attempting to mark failed payment as successful:", {
-          orderId: order.id,
-          currentStatus: order.mpesaStatus,
-          resultCode: callbackDetails.resultCode
-        });
-      }
-
-      // Validate payment amount matches order total (allow small variance for rounding)
-      if (callbackDetails.resultCode === 0 && callbackDetails.amount) {
-        const expectedAmount = order.total / 100; // Convert cents to KSh
-        const actualAmount = callbackDetails.amount;
-        const variance = Math.abs(expectedAmount - actualAmount);
-        
-        if (variance > 1) {
-          console.error("Payment amount mismatch:", {
-            orderId: order.id,
-            expected: expectedAmount,
-            actual: actualAmount,
-            variance: variance
-          });
-          
-          // Update payment record to failed
-          await storage.updatePayment(payment.id, {
-            status: 'failed',
-            failureReason: 'Payment amount mismatch',
-            failureCode: 'AMOUNT_MISMATCH',
-            failedAt: new Date(),
-            mpesaReceiptNumber: callbackDetails.mpesaReceiptNumber || undefined,
-            gatewayResponse: req.body,
-          });
-
-          // Update order for backward compatibility
-          await storage.updateOrderMpesaDetails(order.id, {
-            mpesaStatus: 'failed',
-            mpesaReceiptNumber: callbackDetails.mpesaReceiptNumber || undefined,
-          });
-          
-          callbackProcessed = true;
-          return res.json({ status: "OK", message: "Amount mismatch - marked as failed" });
-        }
-      }
-
-      // Update payment record based on payment result
-      // Convert resultCode to string for consistent comparison throughout the codebase
-      const resultCodeStr = callbackDetails.resultCode?.toString();
-      if (resultCodeStr === '0') {
-        // Payment successful
-        await storage.updatePayment(payment.id, {
-          status: 'completed',
-          receiptNumber: callbackDetails.mpesaReceiptNumber || undefined,
-          mpesaReceiptNumber: callbackDetails.mpesaReceiptNumber || undefined,
-          completedAt: callbackDetails.transactionDate || new Date(),
-          processedAt: new Date(),
-          gatewayResponse: req.body,
-        });
-
-        // Update order for backward compatibility
+    // Update both order and payment records based on result
+    if (ResultCode === 0) {
+      // Payment successful - update order
+      try {
         await storage.updateOrderMpesaDetails(order.id, {
           mpesaStatus: 'paid',
-          mpesaReceiptNumber: callbackDetails.mpesaReceiptNumber || undefined,
-          paidAt: callbackDetails.transactionDate || new Date(),
+          mpesaReceiptNumber: mpesaReceiptNumber,
+          paidAt: new Date()
         });
-
-        console.log(`Payment successful for order ${order.id}:`, {
-          receipt: callbackDetails.mpesaReceiptNumber,
-          amount: callbackDetails.amount,
-          expectedAmount: order.total / 100
-        });
-      } else if (resultCodeStr === '1032') {
-        // Payment cancelled by user
-        await storage.updatePayment(payment.id, {
-          status: 'failed',
-          failureReason: callbackDetails.resultDesc || 'Request cancelled by user',
-          failureCode: callbackDetails.resultCode?.toString() || '1032',
-          failedAt: new Date(),
-          processedAt: new Date(),
-          gatewayResponse: req.body,
-        });
-
-        // Update order with cancelled status for proper frontend feedback
-        await storage.updateOrderMpesaDetails(order.id, {
-          mpesaStatus: 'cancelled',
-        });
-
-        console.log(`Payment cancelled by user for order ${order.id}:`, {
-          resultCode: callbackDetails.resultCode,
-          resultDesc: callbackDetails.resultDesc,
-        });
-      } else {
-        // Payment failed (other error codes)
-        await storage.updatePayment(payment.id, {
-          status: 'failed',
-          failureReason: callbackDetails.resultDesc || 'Payment failed',
-          failureCode: callbackDetails.resultCode?.toString() || 'UNKNOWN',
-          failedAt: new Date(),
-          processedAt: new Date(),
-          gatewayResponse: req.body,
-        });
-
-        // Update order for backward compatibility
-        await storage.updateOrderMpesaDetails(order.id, {
-          mpesaStatus: 'failed',
-        });
-
-        console.log(`Payment failed for order ${order.id}:`, {
-          resultCode: callbackDetails.resultCode,
-          resultDesc: callbackDetails.resultDesc,
-        });
+        console.log("Order updated successfully to 'paid' status");
+      } catch (error) {
+        console.error("Error updating order:", error);
       }
 
-      callbackProcessed = true;
       
-      // Always respond with 200 to Safaricom
-      res.json({ status: "OK" });
-    } catch (error: any) {
-      console.error("Error processing Mpesa callback:", {
-        error: error.message,
-        stack: error.stack,
-        orderFound,
-        callbackProcessed,
-        processingTime: Date.now() - startTime
-      });
+
+      // Update payment record if it exists
+      if (payment) {
+
+        try {
+          await storage.updatePayment(payment.id, {
+            status: 'completed',
+            receiptNumber: mpesaReceiptNumber,
+            mpesaReceiptNumber: mpesaReceiptNumber,
+            completedAt: new Date(),
+            processedAt: new Date(),
+            gatewayResponse: req.body,
+          });
+          console.log("Payment record updated successfully to 'completed'");
+        } catch (error) {
+          console.error("Error updating payment:", error);
+        }
+      } else {
+        console.log("No payment record to update - only order was updated");
+      }
+      console.log("ebu checki" , payment)
+      console.log(`Payment successful for order ${order.id}, receipt: ${mpesaReceiptNumber}`);
       
-      // Still respond with 200 to prevent Safaricom retries
-      res.json({ status: "ERROR", message: error.message });
+    } else if (ResultCode === 1032) {
+      // Payment cancelled by user - update order
+      try {
+
+        // console.log("riang" , payment)
+
+        await storage.updateOrderMpesaDetails(order.id, {
+          mpesaStatus: 'cancelled'
+        });
+        console.log("Order updated to 'cancelled' status");
+      } catch (error) {
+        console.error("Error updating order to cancelled:", error);
+      }
+
+      // Update payment record if it exists
+      if (payment) {
+        try {
+          await storage.updatePayment(payment.id, {
+            status: 'failed',
+            failureReason: ResultDesc || 'Request cancelled by user',
+            failureCode: '1032',
+            failedAt: new Date(),
+            processedAt: new Date(),
+            gatewayResponse: req.body,
+          });
+          console.log("Payment record updated to 'failed' (cancelled)");
+        } catch (error) {
+          console.error("Error updating payment to failed:", error);
+        }
+      }
+      
+      console.log(`Payment cancelled for order ${order.id}`);
+      
+    } else {
+      // Payment failed - update order
+      try {
+        await storage.updateOrderMpesaDetails(order.id, {
+          mpesaStatus: 'failed'
+        });
+        console.log("Order updated to 'failed' status");
+      } catch (error) {
+        console.error("Error updating order to failed:", error);
+      }
+
+      // Update payment record if it exists
+      if (payment) {
+        try {
+          await storage.updatePayment(payment.id, {
+            status: 'failed',
+            failureReason: ResultDesc || 'Payment failed',
+            failureCode: ResultCode?.toString() || 'UNKNOWN',
+            failedAt: new Date(),
+            processedAt: new Date(),
+            gatewayResponse: req.body,
+          });
+          console.log("Payment record updated to 'failed'");
+        } catch (error) {
+          console.error("Error updating payment to failed:", error);
+        }
+      }
+      
+      console.log(`Payment failed for order ${order.id}, code: ${ResultCode}`);
     }
-  });
+
+    // Always return success to M-Pesa
+    return res.status(200).json({ status: "OK" });
+    
+  } catch (error:any) {
+    console.error("Error processing M-Pesa callback:", error.message);
+    console.error("Stack trace:", error.stack);
+    // Still return 200 to prevent M-Pesa retries
+    return res.status(200).json({ status: "OK" });
+  }
+});
+
+//   app.post("/api/payments/mpesa/callback", async (req, res) => {
+//   try {
+//     console.log("M-Pesa callback received");
+    
+//     // Extract callback data
+//     const stkCallback = req.body?.Body?.stkCallback;
+//     if (!stkCallback) {
+//       console.error("Invalid callback structure");
+//       return res.status(200).json({ status: "OK" }); // Always return 200 to M-Pesa
+//     }
+
+//     const {
+//       CheckoutRequestID,
+//       ResultCode,
+//       ResultDesc
+//     } = stkCallback;
+
+//     // Extract payment details if successful
+//     let mpesaReceiptNumber = null;
+//     let phoneNumber = null;
+//     let amount = null;
+    
+//     if (ResultCode === 0 && stkCallback.CallbackMetadata?.Item) {
+//       const items = stkCallback.CallbackMetadata.Item;
+//       mpesaReceiptNumber = items[1].Value;
+//       phoneNumber = items.find((item:any) => item.Name === "PhoneNumber")?.Value;
+//       amount = items.find((item:any) => item.Name === "Amount")?.Value;
+//     }
+
+//     console.log("Callback details:", {
+//       checkoutRequestID: CheckoutRequestID,
+//       resultCode: ResultCode,
+//       resultDesc: ResultDesc,
+//       receipt: mpesaReceiptNumber
+//     });
+
+//     // Find the order
+//     const order = await storage.getOrderByCheckoutRequestId(CheckoutRequestID);
+//     if (!order) {
+//       console.error("Order not found:", CheckoutRequestID);
+//       return res.status(200).json({ status: "OK" });
+//     }
+
+//     // Update order based on result
+//     if (ResultCode === 0) {
+//       // Payment successful
+//       await storage.updateOrderMpesaDetails(order.id, {
+//         mpesaStatus: 'paid',
+//         mpesaReceiptNumber: mpesaReceiptNumber,
+//         paidAt: new Date()
+//       });
+      
+//       console.log(`Payment successful for order ${order.id}, receipt: ${mpesaReceiptNumber}`);
+//     } else if (ResultCode === 1032) {
+//       // Payment cancelled by user
+//       await storage.updateOrderMpesaDetails(order.id, {
+//         mpesaStatus: 'cancelled'
+//       });
+      
+//       console.log(`Payment cancelled for order ${order.id}`);
+//     } else {
+//       // Payment failed
+//       await storage.updateOrderMpesaDetails(order.id, {
+//         mpesaStatus: 'failed'
+//       });
+      
+//       console.log(`Payment failed for order ${order.id}, code: ${ResultCode}`);
+//     }
+
+//     // Always return success to M-Pesa
+//     return res.status(200).json({ status: "OK" });
+    
+//   } catch (error:any) {
+//     console.error("Error processing M-Pesa callback:", error.message);
+//     // Still return 200 to prevent M-Pesa retries
+//     return res.status(200).json({ status: "OK" });
+//   }
+// });
 
   // Development helper endpoint to simulate M-Pesa callback
-  app.post("/api/payments/mpesa/simulate-callback", async (req, res) => {
-    // Only allow in development mode
-    if (!mpesaService.isDevelopmentMode()) {
-      return res.status(403).json({ 
-        error: "Test endpoint only available in development mode" 
-      });
-    }
+  
 
-    try {
-      const { orderId, resultCode = 0, mpesaReceiptNumber } = req.body;
+// app.post("/api/payments/mpesa/callback", async (req, res) => {
+//   try {
+//     console.log("M-Pesa callback received");
+    
+//     // Extract callback data
+//     const stkCallback = req.body?.Body?.stkCallback;
+//     if (!stkCallback) {
+//       console.error("Invalid callback structure");
+//       return res.status(200).json({ status: "OK" }); // Always return 200 to M-Pesa
+//     }
+
+//     const {
+//       CheckoutRequestID,
+//       ResultCode,
+//       ResultDesc
+//     } = stkCallback;
+
+//     // Extract payment details if successful
+//     let mpesaReceiptNumber = null;
+//     let phoneNumber = null;
+//     let amount = null;
+    
+//     if (ResultCode === 0 && stkCallback.CallbackMetadata?.Item) {
+//       const items = stkCallback.CallbackMetadata.Item;
+//       mpesaReceiptNumber = items.find((item:any) => item.Name === "MpesaReceiptNumber")?.Value;
+//       phoneNumber = items.find((item:any) => item.Name === "PhoneNumber")?.Value;
+//       amount = items.find((item:any) => item.Name === "Amount")?.Value;
+//     }
+
+//     console.log("Callback details:", {
+//       checkoutRequestID: CheckoutRequestID,
+//       resultCode: ResultCode,
+//       resultDesc: ResultDesc,
+//       receipt: mpesaReceiptNumber
+//     });
+
+//     // Find the order
+//     const order = await storage.getOrderByCheckoutRequestId(CheckoutRequestID);
+//     if (!order) {
+//       console.error("Order not found:", CheckoutRequestID);
+//       return res.status(200).json({ status: "OK" });
+//     }
+
+//     // Find the payment record
+//     const payment = await storage.getPaymentByMpesaCheckoutId(CheckoutRequestID);
+//     if (!payment) {
+//       console.error("Payment record not found:", CheckoutRequestID);
+//       return res.status(200).json({ status: "OK" });
+//     }
+
+//     // Update both order and payment records based on result
+//     if (ResultCode === 0) {
+//       // Payment successful - update order
+//       await storage.updateOrderMpesaDetails(order.id, {
+//         mpesaStatus: 'paid',
+//         mpesaReceiptNumber: mpesaReceiptNumber,
+//         paidAt: new Date()
+//       });
+
+//       // Update payment record
+//       await storage.updatePayment(payment.id, {
+//         status: 'completed',
+//         receiptNumber: mpesaReceiptNumber,
+//         mpesaReceiptNumber: mpesaReceiptNumber,
+//         completedAt: new Date(),
+//         processedAt: new Date(),
+//         gatewayResponse: req.body,
+//       });
       
-      if (!orderId) {
-        return res.status(400).json({ error: "Order ID is required" });
-      }
-
-      // Find the order and get its checkout request ID
-      const order = await storage.getOrder(orderId);
-      if (!order) {
-        return res.status(404).json({ error: "Order not found" });
-      }
-
-      if (order.paymentMethod !== 'mpesa') {
-        return res.status(400).json({ error: "Order is not an M-Pesa payment" });
-      }
-
-      if (!order.mpesaCheckoutRequestId) {
-        return res.status(400).json({ error: "Order does not have a checkout request ID" });
-      }
-
-      // Generate a test receipt number if not provided
-      const testReceiptNumber = mpesaReceiptNumber || `TEST${Date.now()}${Math.floor(Math.random() * 1000)}`;
+//       console.log(`Payment successful for order ${order.id}, receipt: ${mpesaReceiptNumber}`);
       
-      // Create mock callback structure matching the user-provided format
-      const mockCallbackData = {
-        Body: {
-          stkCallback: {
-            MerchantRequestID: `TEST-${Date.now()}`,
-            CheckoutRequestID: order.mpesaCheckoutRequestId,
-            ResultCode: resultCode,
-            ResultDesc: resultCode === 0 ? "The service request is processed successfully." :
-                       resultCode === 1032 ? "Request cancelled by user" :
-                       "Transaction failed",
-            ...(resultCode === 0 && {
-              CallbackMetadata: {
-                Item: [
-                  { Name: "Amount", Value: order.total / 100 }, // Convert from cents to KSh
-                  { Name: "MpesaReceiptNumber", Value: testReceiptNumber },
-                  { Name: "TransactionDate", Value: parseInt(new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14)) },
-                  { Name: "PhoneNumber", Value: order.mpesaPhone ? parseInt(order.mpesaPhone.replace(/^\+/, '')) : 254700000000 }
-                ]
-              }
-            })
-          }
-        }
-      };
+//     } else if (ResultCode === 1032) {
+//       // Payment cancelled by user - update order
+//       await storage.updateOrderMpesaDetails(order.id, {
+//         mpesaStatus: 'cancelled'
+//       });
 
-      // Call the actual callback endpoint internally
-      const callbackResponse = await fetch(`http://localhost:${process.env.PORT || 5000}/api/payments/mpesa/callback`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(mockCallbackData)
-      });
-
-      if (!callbackResponse.ok) {
-        const errorData = await callbackResponse.json();
-        throw new Error(`Callback processing failed: ${errorData.error || 'Unknown error'}`);
-      }
-
-      const callbackResult = await callbackResponse.json();
+//       // Update payment record
+//       await storage.updatePayment(payment.id, {
+//         status: 'failed',
+//         failureReason: ResultDesc || 'Request cancelled by user',
+//         failureCode: '1032',
+//         failedAt: new Date(),
+//         processedAt: new Date(),
+//         gatewayResponse: req.body,
+//       });
       
-      // Return success response
-      res.json({
-        success: true,
-        message: `Test callback processed successfully for order ${orderId}`,
-        orderId: orderId,
-        checkoutRequestID: order.mpesaCheckoutRequestId,
-        simulatedResultCode: resultCode,
-        simulatedReceiptNumber: testReceiptNumber,
-        callbackResult: callbackResult,
-        note: "This is a development test - not a real M-Pesa transaction"
-      });
+//       console.log(`Payment cancelled for order ${order.id}`);
+      
+//     } else {
+//       // Payment failed - update order
+//       await storage.updateOrderMpesaDetails(order.id, {
+//         mpesaStatus: 'failed'
+//       });
 
-    } catch (error: any) {
-      console.error("Error simulating M-Pesa callback:", error);
-      res.status(500).json({
-        error: "Failed to simulate callback",
-        details: error.message
-      });
-    }
-  });
+//       // Update payment record
+//       await storage.updatePayment(payment.id, {
+//         status: 'failed',
+//         failureReason: ResultDesc || 'Payment failed',
+//         failureCode: ResultCode?.toString() || 'UNKNOWN',
+//         failedAt: new Date(),
+//         processedAt: new Date(),
+//         gatewayResponse: req.body,
+//       });
+      
+//       console.log(`Payment failed for order ${order.id}, code: ${ResultCode}`);
+//     }
 
-  app.get("/api/orders/:id/payment-status", async (req, res) => {
+//     // Always return success to M-Pesa
+//     return res.status(200).json({ status: "OK" });
+    
+//   } catch (error:any) {
+//     console.error("Error processing M-Pesa callback:", error.message);
+//     // Still return 200 to prevent M-Pesa retries
+//     return res.status(200).json({ status: "OK" });
+//   }
+// });
+
+
+ app.get("/api/orders/:id/payment-status", async (req, res) => {
     try {
       const order = await storage.getOrder(req.params.id);
       if (!order) {
