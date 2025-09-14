@@ -1,4 +1,5 @@
 import { Switch, Route, useLocation } from "wouter";
+import { useEffect } from "react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -61,6 +62,11 @@ function App() {
 function AppLayout() {
   const [location] = useLocation();
   const isAdminRoute = location.startsWith('/admin');
+  
+  // Scroll to top when route changes
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [location]);
   
   if (isAdminRoute) {
     // Admin routes don't need Header/Footer - they have their own layouts
