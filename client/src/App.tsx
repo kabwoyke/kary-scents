@@ -19,6 +19,7 @@ import AdminProductsPage from "@/pages/admin/ProductsPage";
 import AdminOrdersPage from "@/pages/admin/OrdersPage";
 import AdminReviewsPage from "@/pages/admin/ReviewsPage";
 import AdminPaymentsPage from "@/pages/admin/PaymentsPage";
+import AdminCategoriesPage from "@/pages/admin/CategoriesPage";
 
 function Router() {
   return (
@@ -27,6 +28,7 @@ function Router() {
       <Route path="/admin/login" component={AdminLoginPage} />
       <Route path="/admin/dashboard" component={AdminDashboardPage} />
       <Route path="/admin/products" component={AdminProductsPage} />
+      <Route path="/admin/categories" component={AdminCategoriesPage} />
       <Route path="/admin/orders" component={AdminOrdersPage} />
       <Route path="/admin/reviews" component={AdminReviewsPage} />
       <Route path="/admin/payments" component={AdminPaymentsPage} />

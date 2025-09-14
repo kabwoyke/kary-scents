@@ -15,7 +15,8 @@ import {
   Users,
   BarChart3,
   MessageSquare,
-  CreditCard
+  CreditCard,
+  FolderOpen
 } from "lucide-react";
 
 interface AdminStats {
@@ -219,7 +220,7 @@ export default function AdminDashboardPage() {
         </div>
 
         {/* Quick Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
           <Card className="hover-elevate cursor-pointer" onClick={() => setLocation("/admin/products")}>
             <CardHeader>
               <div className="flex items-center space-x-2">
@@ -233,6 +234,23 @@ export default function AdminDashboardPage() {
             <CardContent>
               <Button variant="secondary" data-testid="button-manage-products">
                 Go to Products
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="hover-elevate cursor-pointer" onClick={() => setLocation("/admin/categories")}>
+            <CardHeader>
+              <div className="flex items-center space-x-2">
+                <FolderOpen className="w-6 h-6 text-primary" />
+                <CardTitle>Manage Categories</CardTitle>
+              </div>
+              <CardDescription>
+                Organize products into categories and subcategories
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button variant="secondary" data-testid="button-manage-categories">
+                Go to Categories
               </Button>
             </CardContent>
           </Card>
