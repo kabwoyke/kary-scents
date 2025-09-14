@@ -1,6 +1,8 @@
 import { 
   type Product, 
   type InsertProduct, 
+  type Category,
+  type InsertCategory,
   type Order, 
   type InsertOrder,
   type OrderItem,
@@ -23,18 +25,28 @@ import {
   orderItems,
   reviews,
   payments,
-  adminSessions
+  adminSessions,
+  categories
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, count, sum, gte, lt, avg, and, sql, or, ilike } from "drizzle-orm";
 
 export interface IStorage {
+  // Categories
+  getAllCategories(): Promise<Category[]>;
+  getCategory(id: string): Promise<Category | undefined>;
+  getCategoryByName(name: string): Promise<Category | undefined>;
+  createCategory(category: InsertCategory): Promise<Category>;
+  updateCategory(id: string, updates: Partial<InsertCategory>): Promise<Category | undefined>;
+  deleteCategory(id: string): Promise<boolean>;
+  
   // Products
-  getAllProducts(): Promise<Product[]>;
+  getAllProducts(limit?: number, offset?: number): Promise<{ products: Product[]; total: number }>;
   getProduct(id: string): Promise<Product | undefined>;
   createProduct(product: InsertProduct): Promise<Product>;
   updateProduct(id: string, updates: Partial<InsertProduct>): Promise<Product | undefined>;
   deleteProduct(id: string): Promise<boolean>;
+  getProductsByCategory(categoryId: string, limit?: number, offset?: number): Promise<{ products: Product[]; total: number }>;
   
   // Orders
   createOrder(order: InsertOrder, items: InsertOrderItem[]): Promise<Order>;
@@ -113,9 +125,67 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
+  // Categories
+  async getAllCategories(): Promise<Category[]> {
+    return await db.select().from(categories).orderBy(categories.name);
+  }
+
+  async getCategory(id: string): Promise<Category | undefined> {
+    const result = await db.select().from(categories).where(eq(categories.id, id));
+    return result[0];
+  }
+
+  async getCategoryByName(name: string): Promise<Category | undefined> {
+    const result = await db.select().from(categories).where(eq(categories.name, name));
+    return result[0];
+  }
+
+  async createCategory(category: InsertCategory): Promise<Category> {
+    const result = await db.insert(categories).values(category).returning();
+    return result[0];
+  }
+
+  async updateCategory(id: string, updates: Partial<InsertCategory>): Promise<Category | undefined> {
+    const result = await db
+      .update(categories)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(categories.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deleteCategory(id: string): Promise<boolean> {
+    const result = await db.delete(categories).where(eq(categories.id, id));
+    return (result as any).rowCount > 0;
+  }
+
   // Products
-  async getAllProducts(): Promise<Product[]> {
-    return await db.select().from(products);
+  async getAllProducts(limit: number = 50, offset: number = 0): Promise<{ products: Product[]; total: number }> {
+    const [productsResult, totalResult] = await Promise.all([
+      db.select().from(products).orderBy(desc(products.createdAt)).limit(limit).offset(offset),
+      db.select({ count: count() }).from(products)
+    ]);
+    
+    return {
+      products: productsResult,
+      total: totalResult[0].count
+    };
+  }
+
+  async getProductsByCategory(categoryId: string, limit: number = 50, offset: number = 0): Promise<{ products: Product[]; total: number }> {
+    const [productsResult, totalResult] = await Promise.all([
+      db.select().from(products)
+        .where(eq(products.categoryId, categoryId))
+        .orderBy(desc(products.createdAt))
+        .limit(limit)
+        .offset(offset),
+      db.select({ count: count() }).from(products).where(eq(products.categoryId, categoryId))
+    ]);
+    
+    return {
+      products: productsResult,
+      total: totalResult[0].count
+    };
   }
 
   async getProduct(id: string): Promise<Product | undefined> {

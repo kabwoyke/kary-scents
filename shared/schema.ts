@@ -3,6 +3,15 @@ import { pgTable, text, varchar, integer, decimal, timestamp, boolean, index, js
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+// Categories table
+export const categories = pgTable("categories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Products table
 export const products = pgTable("products", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -11,10 +20,15 @@ export const products = pgTable("products", {
   price: integer("price").notNull(), // Price in cents (Ksh)
   originalPrice: integer("original_price"), // Original price for discounts
   image: text("image").notNull(),
-  category: text("category").notNull(),
+  categoryId: varchar("category_id").notNull().references(() => categories.id),
+  category: text("category").notNull(), // Keep for backward compatibility during transition
   isNew: boolean("is_new").default(false),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => {
+  return {
+    categoryIdIdx: index("products_category_id_idx").on(table.categoryId),
+  };
 });
 
 // Orders table
@@ -152,6 +166,12 @@ export const payments = pgTable("payments", {
 });
 
 // Zod schemas
+export const insertCategorySchema = createInsertSchema(categories).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertProductSchema = createInsertSchema(products).omit({
   id: true,
   createdAt: true,
@@ -299,6 +319,8 @@ export const paymentFailureSchema = z.object({
 
 
 // Types
+export type Category = typeof categories.$inferSelect;
+export type InsertCategory = z.infer<typeof insertCategorySchema>;
 export type Product = typeof products.$inferSelect;
 export type InsertProduct = z.infer<typeof insertProductSchema>;
 export type Order = typeof orders.$inferSelect;

@@ -1,7 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProductSchema, insertOrderSchema, adminLoginSchema, stripeConfirmPaymentSchema, insertReviewSchema, updateReviewStatusSchema, insertPaymentSchema, updatePaymentSchema } from "@shared/schema";
+import { insertProductSchema, insertOrderSchema, adminLoginSchema, stripeConfirmPaymentSchema, insertReviewSchema, updateReviewStatusSchema, insertPaymentSchema, updatePaymentSchema, insertCategorySchema } from "@shared/schema";
 import { z } from "zod";
 import Stripe from "stripe";
 import crypto from "crypto";
@@ -335,6 +335,144 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Categories Routes
+  // Public endpoint to get all categories
+  app.get("/api/categories", async (req, res) => {
+    try {
+      const categories = await storage.getAllCategories();
+      res.json(categories);
+    } catch (error) {
+      console.error("Get categories error:", error);
+      res.status(500).json({ error: "Failed to get categories" });
+    }
+  });
+
+  // Public endpoint to get single category
+  app.get("/api/categories/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const category = await storage.getCategory(id);
+      
+      if (!category) {
+        return res.status(404).json({ error: "Category not found" });
+      }
+      
+      res.json(category);
+    } catch (error) {
+      console.error("Get category error:", error);
+      res.status(500).json({ error: "Failed to get category" });
+    }
+  });
+
+  // Admin only - Create new category
+  app.post("/api/categories", requireAdminAuth, async (req, res) => {
+    try {
+      const categoryData = insertCategorySchema.parse(req.body);
+      
+      // Check if category with same name already exists
+      const existingCategory = await storage.getCategoryByName(categoryData.name);
+      if (existingCategory) {
+        return res.status(409).json({ 
+          error: "Category already exists", 
+          message: `Category with name "${categoryData.name}" already exists`
+        });
+      }
+      
+      const category = await storage.createCategory(categoryData);
+      console.log(`Admin created category: ${category.name} (ID: ${category.id})`);
+      res.status(201).json(category);
+    } catch (error) {
+      console.error("Create category error:", error);
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: "Invalid category data", details: error.errors });
+      } else {
+        res.status(500).json({ error: "Failed to create category" });
+      }
+    }
+  });
+
+  // Admin only - Update category
+  app.patch("/api/categories/:id", requireAdminAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updates = insertCategorySchema.partial().parse(req.body);
+      
+      // Check if category exists
+      const existingCategory = await storage.getCategory(id);
+      if (!existingCategory) {
+        return res.status(404).json({ error: "Category not found" });
+      }
+      
+      // If updating name, check if new name already exists (excluding current category)
+      if (updates.name) {
+        const categoryWithSameName = await storage.getCategoryByName(updates.name);
+        if (categoryWithSameName && categoryWithSameName.id !== id) {
+          return res.status(409).json({ 
+            error: "Category name already exists", 
+            message: `Another category with name "${updates.name}" already exists`
+          });
+        }
+      }
+      
+      const updatedCategory = await storage.updateCategory(id, updates);
+      if (!updatedCategory) {
+        return res.status(404).json({ error: "Category not found" });
+      }
+      
+      console.log(`Admin updated category: ${updatedCategory.name} (ID: ${id})`);
+      res.json(updatedCategory);
+    } catch (error) {
+      console.error("Update category error:", error);
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: "Invalid category data", details: error.errors });
+      } else {
+        res.status(500).json({ error: "Failed to update category" });
+      }
+    }
+  });
+
+  // Admin only - Delete category with protective functionality
+  app.delete("/api/categories/:id", requireAdminAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      
+      // Check if category exists
+      const category = await storage.getCategory(id);
+      if (!category) {
+        return res.status(404).json({ error: "Category not found" });
+      }
+      
+      // Check if any products reference this category (protective delete)
+      const { products: productsInCategory } = await storage.getProductsByCategory(id, 1, 0);
+      if (productsInCategory.length > 0) {
+        const { total: totalProducts } = await storage.getProductsByCategory(id);
+        return res.status(409).json({ 
+          error: "Cannot delete category with products", 
+          message: `Cannot delete category "${category.name}" because it has ${totalProducts} product${totalProducts !== 1 ? 's' : ''} assigned to it. Please reassign or delete the products first.`,
+          details: {
+            categoryName: category.name,
+            productCount: totalProducts
+          }
+        });
+      }
+      
+      // Safe to delete - no products reference this category
+      const deleted = await storage.deleteCategory(id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Category not found" });
+      }
+      
+      console.log(`Admin deleted category: ${category.name} (ID: ${id})`);
+      res.json({ 
+        success: true, 
+        message: `Category "${category.name}" deleted successfully` 
+      });
+    } catch (error) {
+      console.error("Delete category error:", error);
+      res.status(500).json({ error: "Failed to delete category" });
+    }
+  });
+
   app.get("/api/admin/me", requireAdminAuth, async (req, res) => {
     try {
       const session = (req as any).adminSession;
@@ -432,9 +570,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Product routes
   app.get("/api/products", async (req, res) => {
     try {
-      const products = await storage.getAllProducts();
+      const result = await storage.getAllProducts();
       // Convert prices from cents to KSh for frontend
-      const productsWithPrices = products.map(product => ({
+      const productsWithPrices = result.products.map(product => ({
         ...product,
         price: product.price / 100,
         originalPrice: product.originalPrice ? product.originalPrice / 100 : undefined,
@@ -780,9 +918,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Admin Products endpoint (distinct from public products)
   app.get("/api/admin/products", requireAdminAuth, async (req, res) => {
     try {
-      const products = await storage.getAllProducts();
+      const result = await storage.getAllProducts();
       // Convert prices from cents to KSh for frontend
-      const productsWithPrices = products.map(product => ({
+      const productsWithPrices = result.products.map(product => ({
         ...product,
         price: product.price / 100,
         originalPrice: product.originalPrice ? product.originalPrice / 100 : undefined,
