@@ -17,7 +17,7 @@ export default function HeroSection() {
       {/* Content */}
       <div className="relative z-10 text-center px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
         <h1 className="text-4xl md:text-6xl font-serif font-bold text-white mb-4">
-          KARY SCENTS
+          Kary Perfumes
         </h1>
         
         <p className="text-lg md:text-xl text-white/90 mb-8 max-w-2xl mx-auto">

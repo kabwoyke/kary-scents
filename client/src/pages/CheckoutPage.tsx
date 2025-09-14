@@ -14,6 +14,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
+import { useSEO, SEO_CONFIGS } from "@/hooks/use-seo";
 
 interface CheckoutFormData {
   firstName: string;
@@ -116,6 +117,9 @@ export default function CheckoutPage() {
   const { state, clearCart } = useCart();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  
+  // Set unique SEO for checkout page
+  useSEO(SEO_CONFIGS.checkout);
 
   const [formData, setFormData] = useState<CheckoutFormData>({
     firstName: "",

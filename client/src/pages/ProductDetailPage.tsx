@@ -13,6 +13,7 @@ import ReviewForm from "@/components/ReviewForm";
 import ReviewList from "@/components/ReviewList";
 import { RatingDisplay } from "@/components/StarRating";
 import { type Product } from "@/components/ProductCard";
+import { useSEO, getProductSEO } from "@/hooks/use-seo";
 
 interface ReviewData {
   averageRating: number;
@@ -38,6 +39,12 @@ export default function ProductDetailPage() {
   });
 
   const product = products.find(p => p.id === id);
+  
+  // Set dynamic SEO for product page
+  useSEO(product ? getProductSEO(product.name, product.id, product.description) : {
+    title: "Product Not Found - Kary Perfumes",
+    description: "The product you're looking for was not found. Browse our collection of premium Arabic perfumes and luxury fragrances.",
+  });
 
   const handleAddToCart = async () => {
     if (!product) return;

@@ -214,7 +214,7 @@ export default function ProductDetailModal({
                           </div>
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">Brand:</span>
-                            <span className="font-medium">KARY SCENTS</span>
+                            <span className="font-medium">Kary Perfumes</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">Origin:</span>

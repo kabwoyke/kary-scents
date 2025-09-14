@@ -1,8 +1,8 @@
-# KARY SCENTS E-commerce Platform
+# Kary Perfumes E-commerce Platform
 
 ## Overview
 
-KARY SCENTS is a luxury Arabic perfume e-commerce platform built for the Kenyan market. The application focuses on selling premium fragrances with an elegant, culturally-inspired design that combines modern web technologies with Arabic aesthetic elements. The platform features a full shopping experience including product browsing, cart management, checkout with payment processing, and administrative tools for order management.
+Kary Perfumes is a luxury Arabic perfume e-commerce platform built for the Kenyan market. The application focuses on selling premium fragrances with an elegant, culturally-inspired design that combines modern web technologies with Arabic aesthetic elements. The platform features a full shopping experience including product browsing, cart management, checkout with payment processing, and administrative tools for order management.
 
 ## User Preferences
 

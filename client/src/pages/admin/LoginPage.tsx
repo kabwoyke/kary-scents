@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { Lock } from "lucide-react";
+import { useSEO } from "@/hooks/use-seo";
 
 const loginSchema = z.object({
   password: z.string().min(1, "Password is required"),
@@ -21,6 +22,13 @@ type LoginFormData = z.infer<typeof loginSchema>;
 export default function AdminLoginPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  
+  // Set unique SEO for admin login page
+  useSEO({
+    title: "Admin Login - Kary Perfumes Management",
+    description: "Admin login for Kary Perfumes management system.",
+    canonical: "https://karyperfumes.com/admin/login"
+  });
 
   const form = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),

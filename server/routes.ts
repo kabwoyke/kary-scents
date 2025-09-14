@@ -1723,7 +1723,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         amount,
         orderId: order.id,
         accountReference: `KARY-${order.id.substring(0, 8)}`,
-        transactionDesc: `Payment for KARY SCENTS order ${order.id.substring(0, 8)}`,
+        transactionDesc: `Payment for Kary Perfumes order ${order.id.substring(0, 8)}`,
       });
 
       // Create payment record in new payments table
@@ -2115,7 +2115,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         amount,
         orderId: order.id,
         accountReference: `KARY-${order.id.substring(0, 8)}`,
-        transactionDesc: `Payment for KARY SCENTS order ${order.id.substring(0, 8)} (resend)`,
+        transactionDesc: `Payment for Kary Perfumes order ${order.id.substring(0, 8)} (resend)`,
       });
 
       // Create new payment record for resend attempt

@@ -2,9 +2,13 @@ import HeroSection from "@/components/HeroSection";
 import ProductGrid from "@/components/ProductGrid";
 import { type Product } from "@/components/ProductCard";
 import { useCart } from "@/context/CartContext";
+import { useSEO, SEO_CONFIGS } from "@/hooks/use-seo";
 
 export default function HomePage() {
   const { addItem } = useCart();
+  
+  // Set unique SEO for home page
+  useSEO(SEO_CONFIGS.home);
 
   const handleAddToCart = (product: Product) => {
     addItem(product);

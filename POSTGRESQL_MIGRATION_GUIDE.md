@@ -1,8 +1,8 @@
-# KARY SCENTS PostgreSQL Migration Guide
+# Kary Perfumes PostgreSQL Migration Guide
 
 ## Migration Overview
 
-The KARY SCENTS e-commerce platform has been successfully migrated from Neon serverless PostgreSQL to standard PostgreSQL. This migration provides better control over your database infrastructure and removes dependency on Neon's serverless platform.
+The Kary Perfumes e-commerce platform has been successfully migrated from Neon serverless PostgreSQL to standard PostgreSQL. This migration provides better control over your database infrastructure and removes dependency on Neon's serverless platform.
 
 ## Changes Made During Migration
 
@@ -366,4 +366,4 @@ DATABASE_URL=postgresql://user:pass@host:5432/db?sslmode=disable
 
 ## Migration Status: ✅ Complete
 
-The migration has been successfully completed and verified. Your KARY SCENTS e-commerce platform is now running on standard PostgreSQL with improved performance and flexibility.
+The migration has been successfully completed and verified. Your Kary Perfumes e-commerce platform is now running on standard PostgreSQL with improved performance and flexibility.

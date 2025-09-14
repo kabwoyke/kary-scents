@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useSEO, SEO_CONFIGS } from "@/hooks/use-seo";
 import { 
   Package, 
   ShoppingCart, 
@@ -29,6 +30,9 @@ interface AdminStats {
 export default function AdminDashboardPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  
+  // Set unique SEO for admin dashboard
+  useSEO(SEO_CONFIGS.admin);
 
   // Fetch admin stats
   const { data: stats, isLoading: statsLoading, error: statsError } = useQuery<AdminStats>({
@@ -107,7 +111,7 @@ export default function AdminDashboardPage() {
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-4">
               <h1 className="text-2xl font-serif font-bold text-primary">
-                KARY SCENTS Admin
+                Kary Perfumes Admin
               </h1>
             </div>
             <Button 

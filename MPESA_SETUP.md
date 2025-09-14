@@ -1,6 +1,6 @@
 # M-Pesa STK Push Integration Setup Guide
 
-This document provides step-by-step instructions for setting up the M-Pesa STK Push payment integration for KARY SCENTS.
+This document provides step-by-step instructions for setting up the M-Pesa STK Push payment integration for Kary Perfumes.
 
 ## 🚀 Quick Start
 
