@@ -317,29 +317,97 @@ export class MpesaService {
       throw new Error('Mpesa is not properly configured');
     }
 
-    const accessToken = await this.getAccessToken();
+    let accessToken: string;
+    let response: Response;
+    let responseData: any;
 
-    const response = await fetch(
-      `${this.config.baseUrl}/mpesa/stkpushquery/v1/query`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(params),
-      }
-    );
+    try {
+      accessToken = await this.getAccessToken();
+    } catch (error: any) {
+      console.error('Failed to get OAuth token for STK query:', error.message);
+      throw new Error('Failed to authenticate with M-Pesa for status query. Please try again later.');
+    }
 
-    const responseData = await response.json();
+    try {
+      response = await fetch(
+        `${this.config.baseUrl}/mpesa/stkpushquery/v1/query`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(params),
+        }
+      );
+    } catch (error: any) {
+      console.error('Network error during STK Query:', error.message);
+      throw new Error('Network error during payment status query. Please check your connection and try again.');
+    }
+
+    try {
+      responseData = await response.json();
+    } catch (error: any) {
+      console.error('Invalid JSON response from M-Pesa STK Query:', error.message);
+      throw new Error('Invalid response from M-Pesa status query. Please try again.');
+    }
 
     if (!response.ok) {
       console.error('STK Query failed:', responseData);
       throw new Error(`STK Query failed: ${responseData.errorMessage || 'Unknown error'}`);
     }
 
-    console.log("xfactor" , responseData)
-    return responseData;
+    console.log("M-Pesa STK Query Response:", responseData);
+    
+    // CRITICAL: Validate required fields exist before processing
+    // Never default critical payment status fields to success values
+    const responseCode = responseData.ResponseCode || responseData.responseCode;
+    const responseDescription = responseData.ResponseDescription || responseData.responseDescription;
+    const merchantRequestID = responseData.MerchantRequestID || responseData.merchantRequestID;
+    const checkoutRequestID = responseData.CheckoutRequestID || responseData.checkoutRequestID;
+    const resultCode = responseData.ResultCode?.toString() || responseData.resultCode?.toString();
+    const resultDesc = responseData.ResultDesc || responseData.resultDesc;
+
+    // CRITICAL: If ResultCode is missing, this indicates a malformed response
+    // We MUST NOT default to success ('0') as this could cause false positive payments
+    if (resultCode === undefined || resultCode === null || resultCode === '') {
+      console.error('CRITICAL: ResultCode missing from M-Pesa STK Query response:', {
+        checkoutRequestID: params.checkoutRequestID,
+        responseData: JSON.stringify(responseData, null, 2)
+      });
+      throw new Error('Incomplete response from M-Pesa: ResultCode missing. Cannot determine payment status.');
+    }
+
+    // Additional validation for required identifiers
+    if (!merchantRequestID || !checkoutRequestID) {
+      console.error('CRITICAL: Required identifiers missing from M-Pesa STK Query response:', {
+        requestCheckoutID: params.checkoutRequestID,
+        merchantRequestID,
+        responseCheckoutID: checkoutRequestID,
+        responseData: JSON.stringify(responseData, null, 2)
+      });
+      throw new Error('Incomplete response from M-Pesa: Required identifiers missing.');
+    }
+
+    // Log the final parsed values for debugging
+    console.log('M-Pesa STK Query parsed response:', {
+      requestCheckoutID: params.checkoutRequestID,
+      responseCode,
+      resultCode,
+      resultDesc,
+      merchantRequestID,
+      responseCheckoutID: checkoutRequestID
+    });
+    
+    // Return the validated response - no dangerous defaults
+    return {
+      responseCode: responseCode || 'unknown',
+      responseDescription: responseDescription || 'No description provided',
+      merchantRequestID,
+      checkoutRequestID: checkoutRequestID,
+      resultCode,
+      resultDesc: resultDesc || 'No description provided'
+    };
   }
 
   /**

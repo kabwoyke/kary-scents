@@ -1881,7 +1881,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Update payment record based on payment result
-      if (callbackDetails.resultCode === 0) {
+      // Convert resultCode to string for consistent comparison throughout the codebase
+      const resultCodeStr = callbackDetails.resultCode?.toString();
+      if (resultCodeStr === '0') {
         // Payment successful
         await storage.updatePayment(payment.id, {
           status: 'completed',
@@ -1904,7 +1906,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           amount: callbackDetails.amount,
           expectedAmount: order.total / 100
         });
-      } else if (callbackDetails.resultCode === 1032) {
+      } else if (resultCodeStr === '1032') {
         // Payment cancelled by user
         await storage.updatePayment(payment.id, {
           status: 'failed',
@@ -1993,15 +1995,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           console.log(`Real-time M-Pesa status for order ${order.id}:`, statusResult);
 
+          // CRITICAL: Validate response structure before processing
+          // Only proceed if we have a valid resultCode and required identifiers
+          if (!statusResult.resultCode || !statusResult.merchantRequestID || !statusResult.checkoutRequestID) {
+            console.error('CRITICAL: Malformed M-Pesa STK Query response - missing required fields:', {
+              orderId: order.id,
+              orderCheckoutRequestID: order.mpesaCheckoutRequestId,
+              resultCode: statusResult.resultCode,
+              merchantRequestID: statusResult.merchantRequestID,
+              responseCheckoutRequestID: statusResult.checkoutRequestID,
+              responseCode: statusResult.responseCode
+            });
+            
+            // Log malformed response but don't change payment status
+            console.warn(`Order ${order.id}: Keeping current status due to malformed M-Pesa response`);
+            
+            // Continue with stored status
+            return res.json({
+              orderId: order.id,
+              status: order.status,
+              paymentMethod: order.paymentMethod,
+              mpesaStatus: order.mpesaStatus,
+              paidAt: order.paidAt,
+              mpesaReceiptNumber: order.mpesaReceiptNumber,
+              total: order.total / 100,
+              realTimeUpdate: false,
+              warning: 'Unable to verify payment status due to incomplete response from M-Pesa'
+            });
+          }
+
           // Update order status based on M-Pesa response
           let updatedOrder = order;
+          
+          // CRITICAL: Only mark as successful with EXPLICIT success code
           if (statusResult.resultCode === '0') {
-            // Payment successful
+            console.log(`PAYMENT SUCCESS: Order ${order.id} confirmed successful by M-Pesa (ResultCode: 0)`);
+            
+            // Payment successful - update both order and payment records
             await storage.updateOrderMpesaDetails(order.id, {
               mpesaStatus: 'paid',
               paidAt: new Date(),
               mpesaReceiptNumber: 'Auto-detected', // M-Pesa doesn't provide receipt in query response
             });
+
+            // CRITICAL: Also update the payment record to 'completed' for revenue calculation
+            const payment = await storage.getPaymentByMpesaCheckoutId(order.mpesaCheckoutRequestId!);
+            if (payment && payment.status !== 'completed') {
+              await storage.updatePayment(payment.id, {
+                status: 'completed',
+                completedAt: new Date(),
+                processedAt: new Date(),
+                receiptNumber: 'Auto-detected-STK'
+              });
+              console.log(`Payment record ${payment.id} marked as completed via STK query`);
+            }
+
             const fetchedOrder = await storage.getOrder(req.params.id);
             if (fetchedOrder) {
               updatedOrder = fetchedOrder;
@@ -2009,10 +2057,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
             console.log(`Order ${order.id} marked as paid via real-time query`);
 
           } else if (statusResult.resultCode === '1032') {
-            // User cancelled transaction
+            // User cancelled transaction - update both order and payment records
             await storage.updateOrderMpesaDetails(order.id, {
               mpesaStatus: 'cancelled',
             });
+
+            // Update payment record to failed for cancelled transactions
+            const payment = await storage.getPaymentByMpesaCheckoutId(order.mpesaCheckoutRequestId!);
+            if (payment && payment.status !== 'failed') {
+              await storage.updatePayment(payment.id, {
+                status: 'failed',
+                failureReason: 'Request cancelled by user',
+                failureCode: '1032',
+                failedAt: new Date(),
+                processedAt: new Date()
+              });
+              console.log(`Payment record ${payment.id} marked as failed (cancelled) via STK query`);
+            }
+
             const fetchedOrder = await storage.getOrder(req.params.id);
             if (fetchedOrder) {
               updatedOrder = fetchedOrder;
@@ -2024,17 +2086,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
             statusResult.resultCode === '1001' || // Invalid transaction
             statusResult.resultCode === '9999'    // Request timeout or other error
           ) {
-            // Transaction failed
+            // Transaction failed - update both order and payment records
             await storage.updateOrderMpesaDetails(order.id, {
               mpesaStatus: 'failed',
             });
+
+            // Update payment record to failed
+            const payment = await storage.getPaymentByMpesaCheckoutId(order.mpesaCheckoutRequestId!);
+            if (payment && payment.status !== 'failed') {
+              await storage.updatePayment(payment.id, {
+                status: 'failed',
+                failureReason: statusResult.resultDesc || 'Transaction failed',
+                failureCode: statusResult.resultCode || 'UNKNOWN',
+                failedAt: new Date(),
+                processedAt: new Date()
+              });
+              console.log(`Payment record ${payment.id} marked as failed via STK query`);
+            }
+
             const fetchedOrder = await storage.getOrder(req.params.id);
             if (fetchedOrder) {
               updatedOrder = fetchedOrder;
             }
             console.log(`Order ${order.id} marked as failed via real-time query. Result: ${statusResult.resultDesc}`);
+          } else {
+            // Unknown or unhandled result code - log but keep current status
+            console.warn('ATTENTION: Unknown M-Pesa result code encountered:', {
+              orderId: order.id,
+              checkoutRequestID: order.mpesaCheckoutRequestId,
+              resultCode: statusResult.resultCode,
+              resultDesc: statusResult.resultDesc,
+              responseCode: statusResult.responseCode,
+              responseDescription: statusResult.responseDescription,
+              merchantRequestID: statusResult.merchantRequestID,
+              message: `Result code '${statusResult.resultCode}' is not explicitly handled. Payment status unchanged.`
+            });
+            
+            // Keep current payment status but add warning flag
+            console.log(`Order ${order.id}: Unknown result code '${statusResult.resultCode}' - keeping current mpesa status: ${order.mpesaStatus}`);
           }
-          // For other result codes (like 1037 pending), keep current status
 
           // Return updated status
           return res.json({
