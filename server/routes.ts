@@ -1709,7 +1709,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           // Query M-Pesa for real-time status
           const statusResult = await mpesaService.querySTKStatus({
-            businessShortCode: mpesaService.getBusinessShortCode(),
+            businessShortCode: process.env.MPESA_BUSINESS_SHORTCODE || "",
             password: password,
             timestamp: timestamp,
             checkoutRequestID: order.mpesaCheckoutRequestId,

@@ -88,7 +88,7 @@ export class MpesaService {
       }
     );
 
-    console.log("boom" , response)
+    // console.log("boom" , response)
     if (!response.ok) {
       const error = await response.text();
       throw new Error(`Failed to get OAuth token: ${response.status} ${error}`);
@@ -197,7 +197,7 @@ export class MpesaService {
     
     try {
       accessToken = await this.getAccessToken();
-      console.log("tok",accessToken)
+ 
     } catch (error: any) {
       console.error('Failed to get OAuth token:', error.message);
       throw new Error('Failed to authenticate with M-Pesa. Please try again later.');
