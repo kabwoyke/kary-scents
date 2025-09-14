@@ -1,4 +1,5 @@
 node_modules
+migrations
 dist
 .DS_Store
 server/public
@@ -14,4 +15,3 @@ cookies.txt
 !.env.example
 session-store/
 temp-credentials.*
-migrations/
