@@ -250,7 +250,7 @@ export default function AdminProductsPage() {
                   Add Product
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-2xl">
+              <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>
                     {editingProduct ? "Edit Product" : "Add New Product"}
@@ -262,7 +262,7 @@ export default function AdminProductsPage() {
                   </DialogDescription>
                 </DialogHeader>
                 <Form {...form}>
-                  <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
+                  <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4 flex flex-col">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <FormField
                         control={form.control}
@@ -396,7 +396,7 @@ export default function AdminProductsPage() {
                         </FormItem>
                       )}
                     />
-                    <div className="flex justify-end space-x-2 pt-4">
+                    <div className="flex justify-end space-x-2 pt-6 mt-auto">
                       <Button 
                         type="button" 
                         variant="outline" 

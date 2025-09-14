@@ -189,7 +189,7 @@ export default function ImageUploader({
           <img
             src={value}
             alt="Product image"
-            className="w-full h-48 object-cover rounded-md border"
+            className="w-full h-32 object-cover rounded-md border"
             data-testid="img-uploaded-preview"
           />
           <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-md flex items-center justify-center">
@@ -211,7 +211,7 @@ export default function ImageUploader({
       {/* Upload area */}
       <div
         className={cn(
-          "relative border-2 border-dashed rounded-lg p-6 text-center transition-colors",
+          "relative border-2 border-dashed rounded-lg p-4 text-center transition-colors",
           isDragging 
             ? "border-primary bg-primary/5" 
             : "border-muted-foreground/25 hover:border-muted-foreground/50",
