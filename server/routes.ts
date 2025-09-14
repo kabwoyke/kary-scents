@@ -46,6 +46,50 @@ setInterval(() => {
   }
 }, Math.min(REVIEW_RATE_LIMIT_WINDOW, ADMIN_LOGIN_RATE_LIMIT_WINDOW)); // Clean at shortest interval
 
+// Pagination utility function
+interface PaginationParams {
+  page: number;
+  limit: number;
+  offset: number;
+}
+
+interface PaginationResponse<T> {
+  data: T[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+function validateAndParsePagination(req: Request): PaginationParams {
+  const page = Math.max(1, parseInt(req.query.page as string) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20));
+  const offset = (page - 1) * limit;
+  
+  return { page, limit, offset };
+}
+
+function createPaginationResponse<T>(
+  data: T[], 
+  total: number, 
+  page: number, 
+  limit: number
+): PaginationResponse<T> {
+  const totalPages = Math.ceil(total / limit);
+  
+  return {
+    data,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages
+    }
+  };
+}
+
 // Rate limiting middleware for admin login
 function checkAdminLoginRateLimit(req: Request, res: Response, next: NextFunction) {
   // Get client IP (handle proxy/cloudflare scenarios)
@@ -570,16 +614,80 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Product routes
   app.get("/api/products", async (req, res) => {
     try {
-      const result = await storage.getAllProducts();
+      // Check if pagination params are explicitly provided
+      const pageParam = req.query.page;
+      const limitParam = req.query.limit;
+      const hasPaginationParams = pageParam !== undefined || limitParam !== undefined;
+      
+      if (hasPaginationParams) {
+        // Return paginated response when pagination params are provided
+        const { page, limit, offset } = validateAndParsePagination(req);
+        const result = await storage.getAllProducts(limit, offset);
+        
+        // Convert prices from cents to KSh for frontend
+        const productsWithPrices = result.products.map(product => ({
+          ...product,
+          price: product.price / 100,
+          originalPrice: product.originalPrice ? product.originalPrice / 100 : undefined,
+        }));
+        
+        const paginatedResponse = createPaginationResponse(
+          productsWithPrices,
+          result.total,
+          page,
+          limit
+        );
+        
+        res.json(paginatedResponse);
+      } else {
+        // Legacy format: return array directly for backward compatibility
+        const result = await storage.getAllProducts();
+        
+        // Convert prices from cents to KSh for frontend
+        const productsWithPrices = result.products.map(product => ({
+          ...product,
+          price: product.price / 100,
+          originalPrice: product.originalPrice ? product.originalPrice / 100 : undefined,
+        }));
+        
+        res.json(productsWithPrices);
+      }
+    } catch (error) {
+      console.error("Error fetching products:", error);
+      res.status(500).json({ error: "Failed to fetch products" });
+    }
+  });
+
+  app.get("/api/products/category/:categoryId", async (req, res) => {
+    try {
+      const { categoryId } = req.params;
+      const { page, limit, offset } = validateAndParsePagination(req);
+      
+      // Validate that category exists
+      const category = await storage.getCategory(categoryId);
+      if (!category) {
+        return res.status(404).json({ error: "Category not found" });
+      }
+      
+      const result = await storage.getProductsByCategory(categoryId, limit, offset);
+      
       // Convert prices from cents to KSh for frontend
       const productsWithPrices = result.products.map(product => ({
         ...product,
         price: product.price / 100,
         originalPrice: product.originalPrice ? product.originalPrice / 100 : undefined,
       }));
-      res.json(productsWithPrices);
+      
+      const paginatedResponse = createPaginationResponse(
+        productsWithPrices,
+        result.total,
+        page,
+        limit
+      );
+      
+      res.json(paginatedResponse);
     } catch (error) {
-      console.error("Error fetching products:", error);
+      console.error("Error fetching products by category:", error);
       res.status(500).json({ error: "Failed to fetch products" });
     }
   });
@@ -918,14 +1026,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Admin Products endpoint (distinct from public products)
   app.get("/api/admin/products", requireAdminAuth, async (req, res) => {
     try {
-      const result = await storage.getAllProducts();
-      // Convert prices from cents to KSh for frontend
-      const productsWithPrices = result.products.map(product => ({
-        ...product,
-        price: product.price / 100,
-        originalPrice: product.originalPrice ? product.originalPrice / 100 : undefined,
-      }));
-      res.json(productsWithPrices);
+      // Check if pagination params are explicitly provided
+      const pageParam = req.query.page;
+      const limitParam = req.query.limit;
+      const hasPaginationParams = pageParam !== undefined || limitParam !== undefined;
+      
+      if (hasPaginationParams) {
+        // Return paginated response when pagination params are provided
+        const { page, limit, offset } = validateAndParsePagination(req);
+        const result = await storage.getAllProducts(limit, offset);
+        
+        // Convert prices from cents to KSh for frontend
+        const productsWithPrices = result.products.map(product => ({
+          ...product,
+          price: product.price / 100,
+          originalPrice: product.originalPrice ? product.originalPrice / 100 : undefined,
+        }));
+        
+        const paginatedResponse = createPaginationResponse(
+          productsWithPrices,
+          result.total,
+          page,
+          limit
+        );
+        
+        res.json(paginatedResponse);
+      } else {
+        // Legacy format: return array directly for backward compatibility
+        const result = await storage.getAllProducts();
+        
+        // Convert prices from cents to KSh for frontend
+        const productsWithPrices = result.products.map(product => ({
+          ...product,
+          price: product.price / 100,
+          originalPrice: product.originalPrice ? product.originalPrice / 100 : undefined,
+        }));
+        
+        res.json(productsWithPrices);
+      }
     } catch (error) {
       console.error("Error fetching admin products:", error);
       res.status(500).json({ error: "Failed to fetch products" });

@@ -13,7 +13,9 @@ export default function HomePage() {
     queryKey: ["/api/products"],
   });
 
-  const featuredProducts = allProducts.slice(0, 3); // Show first 3 products as featured
+  // Safely handle data that might not be an array (defensive programming)
+  const safeProducts = Array.isArray(allProducts) ? allProducts : [];
+  const featuredProducts = safeProducts.slice(0, 3); // Show first 3 products as featured
 
   const handleAddToCart = (product: Product) => {
     addItem(product);
