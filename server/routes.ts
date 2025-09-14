@@ -142,11 +142,33 @@ if (process.env.STRIPE_SECRET_KEY) {
   stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 }
 
-// Initialize Cloudinary - will handle missing CLOUDINARY_URL
+// Initialize Cloudinary
 if (process.env.CLOUDINARY_URL) {
-  cloudinary.config({
-    secure: true // Use HTTPS URLs
-  });
+  try {
+    // Parse CLOUDINARY_URL manually to ensure proper configuration
+    const cloudinaryUrl = process.env.CLOUDINARY_URL;
+    console.log("Configuring Cloudinary with URL format...");
+    
+    // Extract credentials from URL format: cloudinary://api_key:api_secret@cloud_name
+    const url = new URL(cloudinaryUrl);
+    
+    cloudinary.config({
+      cloud_name: url.hostname || "dtiatadm7", // Use provided cloud name as fallback
+      api_key: url.username,
+      api_secret: url.password,
+      secure: true // Always use HTTPS URLs
+    });
+    
+    console.log("Cloudinary configured successfully with cloud:", url.hostname || "dtiatadm7");
+  } catch (error) {
+    console.error("Failed to parse CLOUDINARY_URL:", error);
+    // Fallback configuration
+    cloudinary.config({
+      cloud_name: "dtiatadm7",
+      secure: true
+    });
+    console.warn("Using fallback Cloudinary configuration - uploads may fail without proper credentials");
+  }
 } else {
   console.warn("CLOUDINARY_URL not configured - image upload will not work");
 }
