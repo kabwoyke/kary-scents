@@ -56,7 +56,13 @@ Preferred communication style: Simple, everyday language.
 
 ### Development & Deployment
 - **Replit**: Development environment with integrated deployment capabilities
-- **Asset Management**: Local asset serving for product images with generated image support
+- **Asset Management**: Cloudinary integration for product image uploads and optimization
+
+### Image Processing & Storage
+- **Cloudinary**: Cloud-based image management with automatic optimization and transformation
+- **Upload Features**: Drag-and-drop file upload interface in admin dashboard
+- **Image Optimization**: Automatic format optimization (f_auto, q_auto) and delivery optimization
+- **Security**: Admin-only upload access with file type and size validation (5MB limit)
 
 ### UI & Styling Libraries
 - **Radix UI**: Comprehensive primitive components for accessibility and functionality
