@@ -5,9 +5,30 @@ async function seedProducts() {
   
   // Check if products already exist
   const existingProducts = await storage.getAllProducts();
-  if (existingProducts.length > 0) {
-    console.log(`${existingProducts.length} products already exist, skipping seed.`);
+  if (existingProducts.products.length > 0) {
+    console.log(`${existingProducts.products.length} products already exist, skipping seed.`);
     return;
+  }
+
+  // Create categories first
+  const categories = [
+    { name: "Arabic Fragrances", description: "Traditional Arabic and Middle Eastern perfumes" },
+    { name: "Floral Scents", description: "Delicate floral fragrances with rose, jasmine, and other flowers" },
+    { name: "Oriental", description: "Rich oriental scents with amber, spices, and exotic notes" },
+    { name: "Premium Collection", description: "Exclusive high-end fragrances with rare ingredients" }
+  ];
+
+  const categoryMap = new Map<string, string>();
+  
+  for (const categoryData of categories) {
+    // Check if category already exists
+    let category = await storage.getCategoryByName(categoryData.name);
+    if (!category) {
+      // Create category if it doesn't exist
+      category = await storage.createCategory(categoryData);
+      console.log(`Created category: ${category.name}`);
+    }
+    categoryMap.set(categoryData.name, category.id);
   }
 
   const productsToSeed = [
@@ -65,7 +86,17 @@ async function seedProducts() {
 
   for (const product of productsToSeed) {
     try {
-      await storage.createProduct(product);
+      const categoryId = categoryMap.get(product.category);
+      if (!categoryId) {
+        throw new Error(`Category ID not found for category: ${product.category}`);
+      }
+      
+      const productData = {
+        ...product,
+        categoryId
+      };
+      
+      await storage.createProduct(productData);
       console.log(`Created product: ${product.name}`);
     } catch (error) {
       console.error(`Error creating product ${product.name}:`, error);
