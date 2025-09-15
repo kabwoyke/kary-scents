@@ -1441,13 +1441,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         payment = await storage.createPayment({
           orderId: order.id,
           paymentMethod: 'stripe',
-          amount: order.total, // Keep in cents for consistency
+          amount: (order.total / 100).toFixed(2), // Keep in cents for consistency
           currency: 'KES',
           status: 'completed', // Stripe payments are confirmed when we reach this point
           transactionId: paymentIntentId,
           stripePaymentIntentId: paymentIntentId,
           stripeChargeId: paymentIntent.latest_charge as string,
-          processingFee: Math.round((paymentIntent.amount * 0.036) + 15), // Stripe KE fees: 3.6% + KSh 15
+          processingFee: Math.round((paymentIntent.amount * 0.036) + 15).toFixed(2), // Stripe KE fees: 3.6% + KSh 15
           gatewayResponse: {
             paymentIntent: {
               id: paymentIntent.id,
@@ -1730,7 +1730,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.createPayment({
         orderId: order.id,
         paymentMethod: 'mpesa',
-        amount: order.total, // Keep in cents for consistency
+        amount: (order.total / 100).toFixed(2), // Keep in cents for consistency
         currency: 'KES',
         status: 'pending',
         mpesaMerchantRequestId: stkResult.merchantRequestID,
@@ -2423,7 +2423,7 @@ app.post("/api/payments/mpesa/callback", async (req, res) => {
       await storage.createPayment({
         orderId: order.id,
         paymentMethod: 'mpesa',
-        amount: order.total, // Keep in cents for consistency
+        amount: (order.total / 100).toFixed(2), // Keep in cents for consistency
         currency: 'KES',
         status: 'pending',
         mpesaMerchantRequestId: stkResult.merchantRequestID,

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, decimal, timestamp, boolean, index, json, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, decimal, timestamp, boolean, index, json, unique, numeric } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -114,7 +114,7 @@ export const payments = pgTable("payments", {
   
   // Core payment information
   paymentMethod: text("payment_method").notNull(), // 'stripe' | 'mpesa'
-  amount: integer("amount").notNull(), // Amount in cents
+  amount: numeric("amount", { precision: 10, scale: 2 }).notNull(), // Amount in actual currency units (e.g., 52.00 KES)
   currency: text("currency").notNull().default("KES"),
   status: text("status").notNull().default("pending"), // 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'refunded'
   
@@ -124,7 +124,7 @@ export const payments = pgTable("payments", {
   
   // Payment gateway specific fields
   gatewayResponse: json("gateway_response"), // Full response from payment gateway
-  processingFee: integer("processing_fee"), // Gateway processing fees in cents
+  processingFee: numeric("processing_fee", { precision: 10, scale: 2 }), // Gateway processing fees in actual currency units
   
   // Stripe specific fields
   stripePaymentIntentId: text("stripe_payment_intent_id"),
@@ -164,7 +164,6 @@ export const payments = pgTable("payments", {
     stripePaymentIntentUnique: unique("payments_stripe_pi_unique").on(table.stripePaymentIntentId),
   };
 });
-
 // Zod schemas
 export const insertCategorySchema = createInsertSchema(categories).omit({
   id: true,
