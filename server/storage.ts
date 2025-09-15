@@ -733,7 +733,7 @@ export class DatabaseStorage implements IStorage {
   async updatePayment(id: string, updates: UpdatePayment): Promise<Payment | undefined> {
     const result = await db
       .update(payments)
-      .set({ ...updates, updatedAt: new Date() })
+      .set({ ...updates, processingFee: updates.processingFee?.toString(),  updatedAt: new Date() })
       .where(eq(payments.id, id))
       .returning();
     return result[0];

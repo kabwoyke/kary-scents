@@ -293,7 +293,7 @@ export default function PaymentsPage() {
       style: 'currency',
       currency: 'KES',
       minimumFractionDigits: 0,
-    }).format(amount / 100);
+    }).format(amount);
   };
 
   if (paymentsError) {
