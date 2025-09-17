@@ -1,7 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProductSchema, insertOrderSchema, adminLoginSchema, stripeConfirmPaymentSchema, insertReviewSchema, updateReviewStatusSchema, insertPaymentSchema, updatePaymentSchema, insertCategorySchema } from "@shared/schema";
+import { insertProductSchema, insertOrderSchema, adminLoginSchema, stripeConfirmPaymentSchema, insertReviewSchema, updateReviewStatusSchema, insertPaymentSchema, updatePaymentSchema, insertCategorySchema, orders } from "@shared/schema";
 import { z } from "zod";
 import Stripe from "stripe";
 import crypto from "crypto";
@@ -9,6 +9,8 @@ import { mpesaService } from "./mpesa";
 import { sendOrderReceiptEmail } from "./email";
 import multer from "multer";
 import { v2 as cloudinary } from "cloudinary";
+import { db } from "./db";
+import { and, gte, lt, sql } from "drizzle-orm";
 
 // Simple in-memory rate limiting for review submissions
 interface RateLimitEntry {
@@ -1576,9 +1578,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Order routes
 
- app.post("/api/orders", async (req, res) => {
+
+async function generateOrderNumberSafe() {
+  const maxRetries = 5;
+  let attempt = 0;
+  
+  while (attempt < maxRetries) {
+    try {
+      const today = new Date();
+      const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
+      
+      const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+      
+      const result = await db
+        .select({ count: sql<number>`COUNT(*)` })
+        .from(orders)
+        .where(
+          and(
+            gte(orders.createdAt, todayStart),
+            lt(orders.createdAt, todayEnd)
+          )
+        );
+      
+      const todayCount = (result[0]?.count || 0) + 1;
+      const orderNumber = `ORD-${dateStr}-${todayCount.toString().padStart(3, '0')}`;
+      
+      // Try to create the order with this number
+      // If it fails due to unique constraint, retry
+      return orderNumber;
+      
+    } catch (error) {
+      attempt++;
+      if (attempt >= maxRetries) {
+        throw new Error(`Failed to generate unique order number after ${maxRetries} attempts`);
+      }
+      // Wait a small random time before retrying
+      await new Promise(resolve => setTimeout(resolve, Math.random() * 10));
+    }
+  }
+}
+
+app.post("/api/orders", async (req, res) => {
   try {
-    // Security: Order creation details logged for debugging (PII removed)
     console.log("Order creation initiated:", {
       hasOrder: !!req.body.order,
       hasItems: Array.isArray(req.body.items),
@@ -1587,7 +1629,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     const { order, items } = req.body;
     
-    // Check if order exists and has required properties
+    // Validation logic...
     if (!order) {
       console.error("Order object is missing from request body");
       return res.status(400).json({ error: "Order data is required" });
@@ -1598,43 +1640,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(400).json({ error: "Items array is required" });
     }
     
-    // Check if order has the required numeric properties
-    if (typeof order.deliveryCharge !== 'number' ||
-        typeof order.subtotal !== 'number' ||
-        typeof order.total !== 'number') {
-      console.error("Order missing numeric properties:", {
-        deliveryCharge: order.deliveryCharge,
-        subtotal: order.subtotal,
-        total: order.total
-      });
-      return res.status(400).json({ error: "Order must include deliveryCharge, subtotal, and total as numbers" });
-    }
+    // Generate order number
+    const orderNumber = await generateOrderNumberSafe();
     
-    // Store prices as floats (no conversion needed)
+    // Store prices as floats with order number
     const orderData = {
       ...order,
-      deliveryCharge: parseFloat(order.deliveryCharge.toFixed(2)), // Ensure 2 decimal places
+      orderNumber, // Add the generated order number
+      deliveryCharge: parseFloat(order.deliveryCharge.toFixed(2)),
       subtotal: parseFloat(order.subtotal.toFixed(2)),
       total: parseFloat(order.total.toFixed(2)),
     };
     
-    const orderItemsData = items.map((item: any) => ({
+    const orderItemsData = items.map((item) => ({
       ...item,
-      productPrice: parseFloat((item.productPrice).toFixed(2)), // Remove * 100 conversion
+      productPrice: parseFloat(item.productPrice.toFixed(2)),
     }));
     
     const validatedOrder = insertOrderSchema.parse(orderData);
     const newOrder = await storage.createOrder(validatedOrder, orderItemsData);
     
-    // No conversion needed for response since we're storing as floats
-    const orderWithPrice = {
-      ...newOrder,
-      deliveryCharge: newOrder.deliveryCharge,
-      subtotal: newOrder.subtotal,
-      total: newOrder.total,
-    };
-    
-    res.status(201).json(orderWithPrice);
+    res.status(201).json(newOrder);
   } catch (error) {
     console.error("Error creating order:", error);
     if (error instanceof z.ZodError) {

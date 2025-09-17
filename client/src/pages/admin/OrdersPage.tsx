@@ -37,6 +37,7 @@ import {
 
 interface Order {
   id: string;
+  orderNumber:string;
   customerName: string;
   customerPhone: string;
   customerEmail?: string;
@@ -594,7 +595,7 @@ export default function AdminOrdersPage() {
                           <div className="flex justify-between items-start">
                             <div className="space-y-1">
                               <CardTitle className="text-lg" data-testid={`text-order-id-${order.id}`}>
-                                Order #{order.id.slice(-8).toUpperCase()}
+                                #{order.orderNumber}
                               </CardTitle>
                               <CardDescription data-testid={`text-order-date-${order.id}`}>
                                 {new Date(order.createdAt).toLocaleDateString("en-US", {

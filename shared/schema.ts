@@ -1,6 +1,7 @@
-import { sql } from "drizzle-orm";
+import { and, gte, lt, sql } from "drizzle-orm";
 import { pgTable, text, varchar, integer, decimal, timestamp, boolean, index, json, unique, numeric, real } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
+import { db } from "server/db";
 import { z } from "zod";
 
 // Categories table
@@ -31,11 +32,14 @@ export const products = pgTable("products", {
   };
 });
 
+
+
 // Orders table
 export const orders = pgTable("orders", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   customerName: text("customer_name").notNull(),
   customerPhone: text("customer_phone").notNull(),
+  orderNumber: text("order_number").notNull().unique(), 
   customerEmail: text("customer_email"),
   deliveryAddress: text("delivery_address").notNull(),
   deliveryLocation: text("delivery_location").notNull(), // 'nairobi-cbd' or 'other'
