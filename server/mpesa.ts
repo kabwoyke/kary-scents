@@ -123,6 +123,8 @@ export class MpesaService {
       }
     );
 
+    console.log("my token is" , auth)
+
     // console.log("boom" , response)
     if (!response.ok) {
       const error = await response.text();
@@ -247,7 +249,7 @@ export class MpesaService {
       Password: password,
       Timestamp: timestamp,
       TransactionType: 'CustomerPayBillOnline',
-      Amount: Math.floor(params.amount), // Ensure integer
+      Amount: params.amount, // Ensure integer
       PartyA: normalizedPhone,
       PartyB: this.config.businessShortCode,
       PhoneNumber: normalizedPhone,

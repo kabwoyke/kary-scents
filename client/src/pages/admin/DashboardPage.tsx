@@ -191,7 +191,7 @@ export default function AdminDashboardPage() {
               ) : (
                 <>
                   <div className="text-2xl font-bold" data-testid="text-total-revenue">
-                    KSh {(stats?.totalRevenue || 0).toLocaleString()}
+                    KSh {Number(stats?.totalRevenue || 0).toFixed(2)}
                   </div>
                   <p className="text-xs text-muted-foreground">
                     All time revenue

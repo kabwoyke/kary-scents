@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, decimal, timestamp, boolean, index, json, unique, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, decimal, timestamp, boolean, index, json, unique, numeric, real } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -40,8 +40,8 @@ export const orders = pgTable("orders", {
   deliveryAddress: text("delivery_address").notNull(),
   deliveryLocation: text("delivery_location").notNull(), // 'nairobi-cbd' or 'other'
   deliveryCharge: integer("delivery_charge").notNull(),
-  subtotal: integer("subtotal").notNull(),
-  total: integer("total").notNull(),
+  subtotal: real("subtotal").notNull(),
+  total: real("total").notNull(),
   status: text("status").notNull().default("pending"), // pending, processing, shipped, delivered
   
   // Enhanced payment tracking fields

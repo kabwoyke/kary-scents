@@ -120,6 +120,7 @@ export default function AdminOrdersPage() {
     },
   });
 
+  console.log()
   // Update order status mutation
   const updateOrderStatusMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
@@ -698,7 +699,7 @@ export default function AdminOrdersPage() {
                                 <div className="flex justify-between font-medium border-t pt-2">
                                   <span>Total:</span>
                                   <span data-testid={`text-order-total-${order.id}`}>
-                                    KSh {order.total.toLocaleString()}
+                                    KSh {Number(order.total).toFixed(2)}
                                   </span>
                                 </div>
                                 {order.stripePaymentIntentId && (

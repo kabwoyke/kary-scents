@@ -1093,9 +1093,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Convert prices from cents to KSh for frontend
       const ordersWithPrices = result.orders.map(order => ({
         ...order,
-        deliveryCharge: order.deliveryCharge / 100,
-        subtotal: order.subtotal / 100,
-        total: order.total / 100,
+        deliveryCharge: order.deliveryCharge,
+        subtotal: order.subtotal,
+        total: order.total,
       }));
       
       res.json({
@@ -1126,9 +1126,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Convert prices from cents to KSh for frontend
       const orderWithPrice = {
         ...updatedOrder,
-        deliveryCharge: updatedOrder.deliveryCharge / 100,
-        subtotal: updatedOrder.subtotal / 100,
-        total: updatedOrder.total / 100,
+        deliveryCharge: updatedOrder.deliveryCharge,
+        subtotal: updatedOrder.subtotal,
+        total: updatedOrder.total,
       };
       
       res.json(orderWithPrice);
@@ -1553,7 +1553,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message: "Payment securely confirmed and order updated",
         orderId,
         paymentIntentId,
-        verifiedAmount: orderTotalCents / 100, // Convert back to KSh for response
+        verifiedAmount: orderTotalCents, // Convert back to KSh for response
         verifiedCurrency: 'kes'
       });
 
@@ -1575,73 +1575,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Order routes
-  app.post("/api/orders", async (req, res) => {
-    try {
-      // Security: Order creation details logged for debugging (PII removed)
-      console.log("Order creation initiated:", {
-        hasOrder: !!req.body.order,
-        hasItems: Array.isArray(req.body.items),
-        itemCount: req.body.items?.length || 0
-      });
-      const { order, items } = req.body;
-      
-      // Check if order exists and has required properties
-      if (!order) {
-        console.error("Order object is missing from request body");
-        return res.status(400).json({ error: "Order data is required" });
-      }
-      
-      if (!items || !Array.isArray(items)) {
-        console.error("Items array is missing from request body");
-        return res.status(400).json({ error: "Items array is required" });
-      }
-      
-      // Check if order has the required numeric properties
-      if (typeof order.deliveryCharge !== 'number' || 
-          typeof order.subtotal !== 'number' || 
-          typeof order.total !== 'number') {
-        console.error("Order missing numeric properties:", {
-          deliveryCharge: order.deliveryCharge,
-          subtotal: order.subtotal,
-          total: order.total
-        });
-        return res.status(400).json({ error: "Order must include deliveryCharge, subtotal, and total as numbers" });
-      }
-      
-      // Convert prices from KSh to cents for storage
-      const orderData = {
-        ...order,
-        deliveryCharge: Math.round(order.deliveryCharge * 100),
-        subtotal: Math.round(order.subtotal * 100),
-        total: Math.round(order.total * 100),
-      };
-      
-      const orderItemsData = items.map((item: any) => ({
-        ...item,
-        productPrice: Math.round(item.productPrice * 100),
-      }));
-      
-      const validatedOrder = insertOrderSchema.parse(orderData);
-      const newOrder = await storage.createOrder(validatedOrder, orderItemsData);
-      
-      // Convert back for response
-      const orderWithPrice = {
-        ...newOrder,
-        deliveryCharge: newOrder.deliveryCharge / 100,
-        subtotal: newOrder.subtotal / 100,
-        total: newOrder.total / 100,
-      };
-      
-      res.status(201).json(orderWithPrice);
-    } catch (error) {
-      console.error("Error creating order:", error);
-      if (error instanceof z.ZodError) {
-        res.status(400).json({ error: "Invalid order data", details: error.errors });
-      } else {
-        res.status(500).json({ error: "Failed to create order" });
-      }
+
+ app.post("/api/orders", async (req, res) => {
+  try {
+    // Security: Order creation details logged for debugging (PII removed)
+    console.log("Order creation initiated:", {
+      hasOrder: !!req.body.order,
+      hasItems: Array.isArray(req.body.items),
+      itemCount: req.body.items?.length || 0
+    });
+
+    const { order, items } = req.body;
+    
+    // Check if order exists and has required properties
+    if (!order) {
+      console.error("Order object is missing from request body");
+      return res.status(400).json({ error: "Order data is required" });
     }
-  });
+    
+    if (!items || !Array.isArray(items)) {
+      console.error("Items array is missing from request body");
+      return res.status(400).json({ error: "Items array is required" });
+    }
+    
+    // Check if order has the required numeric properties
+    if (typeof order.deliveryCharge !== 'number' ||
+        typeof order.subtotal !== 'number' ||
+        typeof order.total !== 'number') {
+      console.error("Order missing numeric properties:", {
+        deliveryCharge: order.deliveryCharge,
+        subtotal: order.subtotal,
+        total: order.total
+      });
+      return res.status(400).json({ error: "Order must include deliveryCharge, subtotal, and total as numbers" });
+    }
+    
+    // Store prices as floats (no conversion needed)
+    const orderData = {
+      ...order,
+      deliveryCharge: parseFloat(order.deliveryCharge.toFixed(2)), // Ensure 2 decimal places
+      subtotal: parseFloat(order.subtotal.toFixed(2)),
+      total: parseFloat(order.total.toFixed(2)),
+    };
+    
+    const orderItemsData = items.map((item: any) => ({
+      ...item,
+      productPrice: parseFloat((item.productPrice).toFixed(2)), // Remove * 100 conversion
+    }));
+    
+    const validatedOrder = insertOrderSchema.parse(orderData);
+    const newOrder = await storage.createOrder(validatedOrder, orderItemsData);
+    
+    // No conversion needed for response since we're storing as floats
+    const orderWithPrice = {
+      ...newOrder,
+      deliveryCharge: newOrder.deliveryCharge,
+      subtotal: newOrder.subtotal,
+      total: newOrder.total,
+    };
+    
+    res.status(201).json(orderWithPrice);
+  } catch (error) {
+    console.error("Error creating order:", error);
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: "Invalid order data", details: error.errors });
+    } else {
+      res.status(500).json({ error: "Failed to create order" });
+    }
+  }
+});
 
   app.get("/api/orders/:id", async (req, res) => {
     try {
@@ -1654,14 +1656,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { order, items } = orderWithItems;
       const orderWithPrice = {
         ...order,
-        deliveryCharge: order.deliveryCharge / 100,
-        subtotal: order.subtotal / 100,
-        total: order.total / 100,
+        deliveryCharge: order.deliveryCharge,
+        subtotal: order.subtotal ,
+        total: order.total,
       };
       
       const itemsWithPrice = items.map(item => ({
         ...item,
-        productPrice: item.productPrice / 100,
+        productPrice: item.productPrice,
       }));
       
       res.json({ order: orderWithPrice, items: itemsWithPrice });
@@ -1715,7 +1717,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Convert amount from cents to KES for Mpesa
-      const amount = order.total / 100;
+      const amount = order.total;
 
       // Initiate STK Push
       const stkResult = await mpesaService.initiateSTKPush({
@@ -1730,7 +1732,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.createPayment({
         orderId: order.id,
         paymentMethod: 'mpesa',
-        amount: (order.total / 100).toFixed(2), // Keep in cents for consistency
+        amount: (order.total).toString(), // Keep in cents for consistency
         currency: 'KES',
         status: 'pending',
         mpesaMerchantRequestId: stkResult.merchantRequestID,
@@ -2185,7 +2187,7 @@ app.post("/api/payments/mpesa/callback", async (req, res) => {
             mpesaStatus: order.mpesaStatus,
             paidAt: order.paidAt,
             mpesaReceiptNumber: order.mpesaReceiptNumber,
-            total: order.total / 100,
+            total: order.total,
             realTimeUpdate: false,
             developmentMode: true,
             note: 'Development mode - use test callback endpoint to simulate payment completion'
@@ -2229,7 +2231,7 @@ app.post("/api/payments/mpesa/callback", async (req, res) => {
               mpesaStatus: order.mpesaStatus,
               paidAt: order.paidAt,
               mpesaReceiptNumber: order.mpesaReceiptNumber,
-              total: order.total / 100,
+              total: order.total,
               realTimeUpdate: false,
               warning: 'Unable to verify payment status due to incomplete response from M-Pesa'
             });
@@ -2345,7 +2347,7 @@ app.post("/api/payments/mpesa/callback", async (req, res) => {
             mpesaStatus: updatedOrder.mpesaStatus,
             paidAt: updatedOrder.paidAt,
             mpesaReceiptNumber: updatedOrder.mpesaReceiptNumber,
-            total: updatedOrder.total / 100, // Convert back to KSh
+            total: updatedOrder.total, // Convert back to KSh
             realTimeUpdate: true, // Flag to indicate this was updated via real-time query
           });
 
@@ -2364,7 +2366,7 @@ app.post("/api/payments/mpesa/callback", async (req, res) => {
         mpesaStatus: order.mpesaStatus,
         paidAt: order.paidAt,
         mpesaReceiptNumber: order.mpesaReceiptNumber,
-        total: order.total / 100, // Convert back to KSh
+        total: order.total, // Convert back to KSh
         realTimeUpdate: false, // Flag to indicate this was from stored data
       });
     } catch (error: any) {
@@ -2408,7 +2410,7 @@ app.post("/api/payments/mpesa/callback", async (req, res) => {
       }
 
       // Convert amount from cents to KES for Mpesa
-      const amount = order.total / 100;
+      const amount = order.total;
 
       // Initiate STK Push
       const stkResult = await mpesaService.initiateSTKPush({
@@ -2423,7 +2425,7 @@ app.post("/api/payments/mpesa/callback", async (req, res) => {
       await storage.createPayment({
         orderId: order.id,
         paymentMethod: 'mpesa',
-        amount: (order.total / 100).toFixed(2), // Keep in cents for consistency
+        amount: (order.total).toFixed(2), // Keep in cents for consistency
         currency: 'KES',
         status: 'pending',
         mpesaMerchantRequestId: stkResult.merchantRequestID,
