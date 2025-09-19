@@ -1116,8 +1116,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { status } = req.body;
       
-      if (!status || !['pending', 'processing', 'shipped', 'delivered'].includes(status)) {
-        return res.status(400).json({ error: "Invalid status. Must be: pending, processing, shipped, or delivered" });
+      if (!status || !['pending', 'processing', 'shipped', 'delivered', 'cancelled'].includes(status)) {
+        return res.status(400).json({ error: "Invalid status. Must be: pending, processing, shipped, delivered, or cancelled" });
       }
       
       const updatedOrder = await storage.updateOrderStatus(req.params.id, status);
