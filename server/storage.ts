@@ -122,6 +122,9 @@ export interface IStorage {
   getPaymentHistory(orderId: string): Promise<Order | undefined>;
   getOrdersByPaymentMethod(method: 'stripe' | 'mpesa', limit?: number): Promise<Order[]>;
   getFailedPayments(limit?: number): Promise<Order[]>;
+  
+  // Atomic Order Cancellation
+  cancelOrderAtomic(orderId: string, paymentMethod: string): Promise<{ order: Order | undefined; cancelledPayments: Payment[] }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -906,6 +909,68 @@ export class DatabaseStorage implements IStorage {
       },
       statusBreakdown
     };
+  }
+
+  // Atomic Order Cancellation - Updates order status, mpesa status, and payment records in a single transaction
+  async cancelOrderAtomic(orderId: string, paymentMethod: string): Promise<{ order: Order | undefined; cancelledPayments: Payment[] }> {
+    return await db.transaction(async (tx) => {
+      // 1. Update main order status to cancelled
+      const [updatedOrder] = await tx
+        .update(orders)
+        .set({ 
+          status: 'cancelled',
+          updatedAt: new Date()
+        })
+        .where(eq(orders.id, orderId))
+        .returning();
+
+      // 2. Update payment-specific status (mpesaStatus for mpesa payments)
+      if (paymentMethod === 'mpesa') {
+        await tx
+          .update(orders)
+          .set({ 
+            mpesaStatus: 'cancelled',
+            updatedAt: new Date()
+          })
+          .where(eq(orders.id, orderId));
+      }
+
+      // 3. Get all payments for this order
+      const orderPayments = await tx
+        .select()
+        .from(payments)
+        .where(eq(payments.orderId, orderId));
+
+      // 4. Update all payment records to cancelled status
+      const cancelledPayments: Payment[] = [];
+      for (const payment of orderPayments) {
+        const [cancelledPayment] = await tx
+          .update(payments)
+          .set({
+            status: 'cancelled',
+            failedAt: new Date(),
+            failureReason: 'Payment cancelled by user',
+            updatedAt: new Date()
+          })
+          .where(eq(payments.id, payment.id))
+          .returning();
+        
+        if (cancelledPayment) {
+          cancelledPayments.push(cancelledPayment);
+        }
+      }
+
+      console.log(`Order ${orderId} atomically cancelled:`, {
+        orderStatus: updatedOrder?.status,
+        mpesaStatus: paymentMethod === 'mpesa' ? 'cancelled' : 'N/A',
+        cancelledPaymentsCount: cancelledPayments.length
+      });
+
+      return {
+        order: updatedOrder,
+        cancelledPayments
+      };
+    });
   }
 }
 

@@ -48,6 +48,67 @@ setInterval(() => {
   }
 }, Math.min(REVIEW_RATE_LIMIT_WINDOW, ADMIN_LOGIN_RATE_LIMIT_WINDOW)); // Clean at shortest interval
 
+// Cancellation token utilities for secure order cancellation
+const CANCELLATION_SECRET = process.env.CANCELLATION_SECRET || 'kary-cancel-secret-change-in-production';
+
+interface CancellationTokenData {
+  orderId: string;
+  timestamp: number;
+  paymentMethod: string;
+}
+
+function generateCancellationToken(orderId: string, paymentMethod: string): string {
+  const tokenData: CancellationTokenData = {
+    orderId,
+    timestamp: Date.now(),
+    paymentMethod
+  };
+  
+  const payload = Buffer.from(JSON.stringify(tokenData)).toString('base64');
+  const signature = crypto
+    .createHmac('sha256', CANCELLATION_SECRET)
+    .update(payload)
+    .digest('hex');
+  
+  return `${payload}.${signature}`;
+}
+
+function validateCancellationToken(token: string, orderId: string, paymentMethod: string): boolean {
+  try {
+    const [payload, signature] = token.split('.');
+    if (!payload || !signature) return false;
+    
+    // Verify signature
+    const expectedSignature = crypto
+      .createHmac('sha256', CANCELLATION_SECRET)
+      .update(payload)
+      .digest('hex');
+    
+    if (signature !== expectedSignature) return false;
+    
+    // Decode and validate payload
+    const tokenData: CancellationTokenData = JSON.parse(
+      Buffer.from(payload, 'base64').toString('utf8')
+    );
+    
+    // Check if token matches order and payment method
+    if (tokenData.orderId !== orderId || tokenData.paymentMethod !== paymentMethod) {
+      return false;
+    }
+    
+    // Check if token is not expired (2 hours limit)
+    const TOKEN_EXPIRY_MS = 2 * 60 * 60 * 1000; // 2 hours
+    if (Date.now() - tokenData.timestamp > TOKEN_EXPIRY_MS) {
+      return false;
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Error validating cancellation token:', error);
+    return false;
+  }
+}
+
 // Pagination utility function
 interface PaginationParams {
   page: number;
@@ -1777,6 +1838,9 @@ app.post("/api/orders", async (req, res) => {
         paymentMethod: 'mpesa',
       });
 
+      // Generate cancellation token for secure cancellation
+      const cancellationToken = generateCancellationToken(order.id, 'mpesa');
+
       console.log(`STK Push initiated for order ${order.id}:`, {
         merchantRequestID: stkResult.merchantRequestID,
         checkoutRequestID: stkResult.checkoutRequestID,
@@ -1788,6 +1852,7 @@ app.post("/api/orders", async (req, res) => {
         checkoutRequestID: stkResult.checkoutRequestID,
         merchantRequestID: stkResult.merchantRequestID,
         customerMessage: stkResult.customerMessage,
+        cancellationToken, // Include token for secure cancellation
       });
     } catch (error: any) {
       console.error("Error initiating Mpesa payment:", error);
@@ -2493,13 +2558,24 @@ app.post("/api/payments/mpesa/callback", async (req, res) => {
     }
   });
 
-  // Cancel payment
+  // Cancel payment - SECURED with cancellation token
   app.post("/api/payments/mpesa/cancel", async (req, res) => {
     try {
-      const { orderId } = req.body;
+      const { orderId, cancellationToken } = req.body;
 
       if (!orderId) {
         return res.status(400).json({ error: "Order ID is required" });
+      }
+
+      if (!cancellationToken) {
+        return res.status(400).json({ error: "Cancellation token is required" });
+      }
+
+      // Validate cancellation token
+      if (!validateCancellationToken(cancellationToken, orderId, 'mpesa')) {
+        return res.status(403).json({ 
+          error: "Invalid or expired cancellation token" 
+        });
       }
 
       // Get order details
@@ -2515,19 +2591,16 @@ app.post("/api/payments/mpesa/callback", async (req, res) => {
         });
       }
 
-      // Mark payment as cancelled - both mpesa status and main order status
-      await storage.updateOrderMpesaDetails(order.id, {
-        mpesaStatus: 'cancelled' as any,
-      });
-      
-      // Also update the main order status to cancelled
-      await storage.updateOrderStatus(order.id, 'cancelled');
+      // Atomically cancel the order - updates order status, mpesa status, and payment records
+      const { order: cancelledOrder, cancelledPayments } = await storage.cancelOrderAtomic(order.id, 'mpesa');
 
-      console.log(`Payment cancelled for order ${order.id}`);
+      console.log(`Payment cancelled for order ${order.id} - ${cancelledPayments.length} payment(s) cancelled`);
 
       res.json({
         success: true,
-        message: "Payment cancelled successfully"
+        message: "Payment cancelled successfully",
+        order: cancelledOrder,
+        cancelledPaymentsCount: cancelledPayments.length
       });
     } catch (error: any) {
       console.error("Error cancelling Mpesa payment:", error);
