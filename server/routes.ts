@@ -2515,10 +2515,13 @@ app.post("/api/payments/mpesa/callback", async (req, res) => {
         });
       }
 
-      // Mark payment as cancelled
+      // Mark payment as cancelled - both mpesa status and main order status
       await storage.updateOrderMpesaDetails(order.id, {
         mpesaStatus: 'cancelled' as any,
       });
+      
+      // Also update the main order status to cancelled
+      await storage.updateOrderStatus(order.id, 'cancelled');
 
       console.log(`Payment cancelled for order ${order.id}`);
 
