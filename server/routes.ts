@@ -1413,7 +1413,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         cancellationToken // Include token for secure cancellation
       });
     } catch (error: any) {
-      console.error("Error creating payment intent:", error);
+      console.error("Error creating payment intent:", JSON.stringify(error, null, 2));
+
       res.status(500).json({ error: "Error creating payment intent: " + error.message });
     }
   });
