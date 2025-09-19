@@ -49,7 +49,15 @@ setInterval(() => {
 }, Math.min(REVIEW_RATE_LIMIT_WINDOW, ADMIN_LOGIN_RATE_LIMIT_WINDOW)); // Clean at shortest interval
 
 // Cancellation token utilities for secure order cancellation
-const CANCELLATION_SECRET = process.env.CANCELLATION_SECRET || 'kary-cancel-secret-change-in-production';
+const CANCELLATION_SECRET = process.env.CANCELLATION_SECRET || (() => {
+  const fallback = 'kary-dev-secret-not-for-production';
+  if (process.env.NODE_ENV === 'production') {
+    console.error('CRITICAL: CANCELLATION_SECRET environment variable must be set in production');
+    process.exit(1);
+  }
+  console.warn('WARNING: Using development cancellation secret. Set CANCELLATION_SECRET environment variable for production.');
+  return fallback;
+})();
 
 interface CancellationTokenData {
   orderId: string;
@@ -66,7 +74,7 @@ function generateCancellationToken(orderId: string, paymentMethod: string): stri
   
   const payload = Buffer.from(JSON.stringify(tokenData)).toString('base64');
   const signature = crypto
-    .createHmac('sha256', CANCELLATION_SECRET)
+    .createHmac('sha256', CANCELLATION_SECRET!)
     .update(payload)
     .digest('hex');
   
@@ -80,7 +88,7 @@ function validateCancellationToken(token: string, orderId: string, paymentMethod
     
     // Verify signature
     const expectedSignature = crypto
-      .createHmac('sha256', CANCELLATION_SECRET)
+      .createHmac('sha256', CANCELLATION_SECRET!)
       .update(payload)
       .digest('hex');
     
@@ -1390,6 +1398,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       });
       
+      // Generate cancellation token for secure cancellation
+      const cancellationToken = generateCancellationToken(orderId, 'stripe');
+
       console.log(`Stripe payment intent created:`, {
         paymentIntentId: paymentIntent.id,
         orderId,
@@ -1397,7 +1408,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         currency: paymentIntent.currency
       });
       
-      res.json({ clientSecret: paymentIntent.client_secret });
+      res.json({ 
+        clientSecret: paymentIntent.client_secret,
+        cancellationToken // Include token for secure cancellation
+      });
     } catch (error: any) {
       console.error("Error creating payment intent:", error);
       res.status(500).json({ error: "Error creating payment intent: " + error.message });
@@ -1634,6 +1648,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
         stack: error.stack
       });
       res.status(500).json({ error: "Payment confirmation failed: " + error.message });
+    }
+  });
+
+  // Cancel Stripe payment - SECURED with cancellation token
+  app.post("/api/payments/stripe/cancel", async (req, res) => {
+    if (!stripe) {
+      return res.status(500).json({ error: "Payment processing not configured. Missing Stripe keys." });
+    }
+
+    try {
+      const { orderId, cancellationToken } = req.body;
+
+      if (!orderId) {
+        return res.status(400).json({ error: "Order ID is required" });
+      }
+
+      if (!cancellationToken) {
+        return res.status(400).json({ error: "Cancellation token is required" });
+      }
+
+      // Validate cancellation token
+      if (!validateCancellationToken(cancellationToken, orderId, 'stripe')) {
+        return res.status(403).json({ 
+          error: "Invalid or expired cancellation token" 
+        });
+      }
+
+      // Get order details
+      const order = await storage.getOrder(orderId);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+
+      // Check if order is already cancelled
+      if (order.status === 'cancelled') {
+        return res.status(200).json({
+          success: true,
+          message: "Order is already cancelled",
+          order
+        });
+      }
+
+      // Only allow cancellation of pending/processing payments
+      if (!['pending', 'processing'].includes(order.status)) {
+        return res.status(400).json({ 
+          error: `Cannot cancel order with status: ${order.status}` 
+        });
+      }
+
+      // If there's a Stripe payment intent, handle external cancellation/refund first
+      if (order.stripePaymentIntentId) {
+        try {
+          const paymentIntent = await stripe.paymentIntents.retrieve(order.stripePaymentIntentId);
+          
+          // Handle different payment intent statuses appropriately
+          if (['requires_payment_method', 'requires_confirmation', 'requires_action', 'processing'].includes(paymentIntent.status)) {
+            // PaymentIntent can be cancelled
+            const cancelledIntent = await stripe.paymentIntents.cancel(order.stripePaymentIntentId);
+            console.log(`Stripe PaymentIntent ${order.stripePaymentIntentId} cancelled successfully:`, cancelledIntent.status);
+          } else if (paymentIntent.status === 'succeeded') {
+            // Payment completed - cannot cancel, would need refund
+            return res.status(409).json({ 
+              error: "Payment has already been completed and cannot be cancelled. A refund would be required instead." 
+            });
+          } else if (paymentIntent.status === 'canceled') {
+            // Already cancelled - that's fine, continue with order cancellation
+            console.log(`Stripe PaymentIntent ${order.stripePaymentIntentId} was already cancelled`);
+          } else {
+            // Unexpected status
+            console.warn(`Unexpected Stripe PaymentIntent status: ${paymentIntent.status}`);
+          }
+        } catch (stripeError: any) {
+          console.error('Failed to handle Stripe PaymentIntent cancellation:', stripeError);
+          
+          // If it's already cancelled, that's fine
+          if (stripeError.code === 'payment_intent_unexpected_state' && stripeError.message?.includes('canceled')) {
+            console.log('PaymentIntent was already cancelled, proceeding with order cancellation');
+          } else {
+            return res.status(500).json({ 
+              error: "Failed to cancel payment with payment provider",
+              details: stripeError.message
+            });
+          }
+        }
+      }
+
+      // Atomically cancel the order - updates order status, stripe status, and payment records
+      const { order: cancelledOrder, cancelledPayments } = await storage.cancelOrderAtomic(order.id, 'stripe');
+
+      console.log(`Stripe payment cancelled for order ${order.id} - ${cancelledPayments.length} payment(s) cancelled`);
+
+      res.json({
+        success: true,
+        message: "Payment cancelled successfully",
+        order: cancelledOrder,
+        cancelledPaymentsCount: cancelledPayments.length
+      });
+    } catch (error: any) {
+      console.error("Error cancelling Stripe payment:", error);
+      res.status(500).json({ 
+        error: "Failed to cancel payment", 
+        details: error.message 
+      });
     }
   });
 

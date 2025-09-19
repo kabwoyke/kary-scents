@@ -32,7 +32,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
-  Trash2
+  Trash2,
+  XCircle
 } from "lucide-react";
 
 interface Order {
@@ -57,6 +58,7 @@ const statusConfig = {
   processing: { icon: Package, color: "bg-blue-500", label: "Processing" },
   shipped: { icon: Truck, color: "bg-purple-500", label: "Shipped" },
   delivered: { icon: CheckCircle, color: "bg-green-500", label: "Delivered" },
+  cancelled: { icon: XCircle, color: "bg-red-500", label: "Cancelled" },
 };
 
 const orderSchema = z.object({
@@ -67,7 +69,7 @@ const orderSchema = z.object({
   deliveryLocation: z.enum(["nairobi-cbd", "nairobi-other"], {
     required_error: "Please select a delivery location",
   }),
-  status: z.enum(["pending", "processing", "shipped", "delivered"]),
+  status: z.enum(["pending", "processing", "shipped", "delivered", "cancelled"]),
 });
 
 type OrderFormData = z.infer<typeof orderSchema>;
@@ -121,7 +123,6 @@ export default function AdminOrdersPage() {
     },
   });
 
-  console.log()
   // Update order status mutation
   const updateOrderStatusMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
@@ -290,6 +291,7 @@ export default function AdminOrdersPage() {
     processing: orders.filter((o: Order) => o.status === "processing"),
     shipped: orders.filter((o: Order) => o.status === "shipped"),
     delivered: orders.filter((o: Order) => o.status === "delivered"),
+    cancelled: orders.filter((o: Order) => o.status === "cancelled"),
   };
 
   if (error) {
@@ -525,6 +527,7 @@ export default function AdminOrdersPage() {
                   <SelectItem value="processing">Processing</SelectItem>
                   <SelectItem value="shipped">Shipped</SelectItem>
                   <SelectItem value="delivered">Delivered</SelectItem>
+                  <SelectItem value="cancelled">Cancelled</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -533,7 +536,7 @@ export default function AdminOrdersPage() {
 
         {/* Status Tabs */}
         <Tabs value={selectedStatus} onValueChange={handleStatusChange} className="mb-8">
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="all" data-testid="tab-all-orders">
               All Orders ({totalOrders})
             </TabsTrigger>
@@ -548,6 +551,9 @@ export default function AdminOrdersPage() {
             </TabsTrigger>
             <TabsTrigger value="delivered" data-testid="tab-delivered-orders">
               Delivered ({ordersByStatus.delivered.length})
+            </TabsTrigger>
+            <TabsTrigger value="cancelled" data-testid="tab-cancelled-orders">
+              Cancelled ({ordersByStatus.cancelled.length})
             </TabsTrigger>
           </TabsList>
 
