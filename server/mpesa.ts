@@ -355,6 +355,7 @@ export class MpesaService {
 
     try {
       accessToken = await this.getAccessToken();
+      console.log(accessToken)
     } catch (error: any) {
       console.error('Failed to get OAuth token for STK query:', error.message);
       throw new Error('Failed to authenticate with M-Pesa for status query. Please try again later.');
