@@ -15,7 +15,7 @@ export default function CartPage() {
   useSEO(SEO_CONFIGS.cart);
 
   const deliveryCharge = 200; // Fixed delivery charge for Nairobi CBD
-  const total = state.total + deliveryCharge;
+  const total = state.total;
 
   const handleQuantityUpdate = (id: string, newQuantity: number) => {
     if (newQuantity <= 0) {
@@ -198,9 +198,14 @@ export default function CartPage() {
                   <span>KSh {state.total.toLocaleString()}</span>
                 </div>
                 
-                <div className="flex justify-between" data-testid="text-delivery">
+                {/* <div className="flex justify-between" data-testid="text-delivery">
                   <span>Delivery to Nairobi CBD</span>
                   <span>KSh {deliveryCharge.toLocaleString()}</span>
+                </div> */}
+
+                <div className="flex justify-between" data-testid="text-delivery">
+                  <span>Delivery in Embu</span>
+                  <span>Free</span>
                 </div>
                 
                 <Separator />
