@@ -48,16 +48,16 @@ setInterval(() => {
   }
 }, Math.min(REVIEW_RATE_LIMIT_WINDOW, ADMIN_LOGIN_RATE_LIMIT_WINDOW)); // Clean at shortest interval
 
-// Cancellation token utilities for secure order cancellation
-const CANCELLATION_SECRET = process.env.CANCELLATION_SECRET || (() => {
-  const fallback = 'kary-dev-secret-not-for-production';
-  if (process.env.NODE_ENV === 'production') {
-    console.error('CRITICAL: CANCELLATION_SECRET environment variable must be set in production');
-    process.exit(1);
-  }
-  console.warn('WARNING: Using development cancellation secret. Set CANCELLATION_SECRET environment variable for production.');
-  return fallback;
-})();
+// // Cancellation token utilities for secure order cancellation
+// const CANCELLATION_SECRET = process.env.CANCELLATION_SECRET || (() => {
+//   const fallback = 'kary-dev-secret-not-for-production';
+//   if (process.env.NODE_ENV === 'production') {
+//     console.error('CRITICAL: CANCELLATION_SECRET environment variable must be set in production');
+//     process.exit(1);
+//   }
+//   console.warn('WARNING: Using development cancellation secret. Set CANCELLATION_SECRET environment variable for production.');
+//   return fallback;
+// })();
 
 interface CancellationTokenData {
   orderId: string;
@@ -65,57 +65,57 @@ interface CancellationTokenData {
   paymentMethod: string;
 }
 
-function generateCancellationToken(orderId: string, paymentMethod: string): string {
-  const tokenData: CancellationTokenData = {
-    orderId,
-    timestamp: Date.now(),
-    paymentMethod
-  };
+// function generateCancellationToken(orderId: string, paymentMethod: string): string {
+//   const tokenData: CancellationTokenData = {
+//     orderId,
+//     timestamp: Date.now(),
+//     paymentMethod
+//   };
   
-  const payload = Buffer.from(JSON.stringify(tokenData)).toString('base64');
-  const signature = crypto
-    .createHmac('sha256', CANCELLATION_SECRET!)
-    .update(payload)
-    .digest('hex');
+//   const payload = Buffer.from(JSON.stringify(tokenData)).toString('base64');
+//   const signature = crypto
+//     .createHmac('sha256', CANCELLATION_SECRET!)
+//     .update(payload)
+//     .digest('hex');
   
-  return `${payload}.${signature}`;
-}
+//   return `${payload}.${signature}`;
+// }
 
-function validateCancellationToken(token: string, orderId: string, paymentMethod: string): boolean {
-  try {
-    const [payload, signature] = token.split('.');
-    if (!payload || !signature) return false;
+// function validateCancellationToken(token: string, orderId: string, paymentMethod: string): boolean {
+//   try {
+//     const [payload, signature] = token.split('.');
+//     if (!payload || !signature) return false;
     
-    // Verify signature
-    const expectedSignature = crypto
-      .createHmac('sha256', CANCELLATION_SECRET!)
-      .update(payload)
-      .digest('hex');
+//     // // Verify signature
+//     // const expectedSignature = crypto
+//     //   .createHmac('sha256', CANCELLATION_SECRET!)
+//     //   .update(payload)
+//     //   .digest('hex');
     
-    if (signature !== expectedSignature) return false;
+//     // if (signature !== expectedSignature) return false;
     
-    // Decode and validate payload
-    const tokenData: CancellationTokenData = JSON.parse(
-      Buffer.from(payload, 'base64').toString('utf8')
-    );
+//     // Decode and validate payload
+//     const tokenData: CancellationTokenData = JSON.parse(
+//       Buffer.from(payload, 'base64').toString('utf8')
+//     );
     
-    // Check if token matches order and payment method
-    if (tokenData.orderId !== orderId || tokenData.paymentMethod !== paymentMethod) {
-      return false;
-    }
+//     // Check if token matches order and payment method
+//     if (tokenData.orderId !== orderId || tokenData.paymentMethod !== paymentMethod) {
+//       return false;
+//     }
     
-    // Check if token is not expired (2 hours limit)
-    const TOKEN_EXPIRY_MS = 2 * 60 * 60 * 1000; // 2 hours
-    if (Date.now() - tokenData.timestamp > TOKEN_EXPIRY_MS) {
-      return false;
-    }
+//     // Check if token is not expired (2 hours limit)
+//     const TOKEN_EXPIRY_MS = 2 * 60 * 60 * 1000; // 2 hours
+//     if (Date.now() - tokenData.timestamp > TOKEN_EXPIRY_MS) {
+//       return false;
+//     }
     
-    return true;
-  } catch (error) {
-    console.error('Error validating cancellation token:', error);
-    return false;
-  }
-}
+//     return true;
+//   } catch (error) {
+//     console.error('Error validating cancellation token:', error);
+//     return false;
+//   }
+// }
 
 // Pagination utility function
 interface PaginationParams {
@@ -1398,8 +1398,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       });
       
-      // Generate cancellation token for secure cancellation
-      const cancellationToken = generateCancellationToken(orderId, 'stripe');
+      // // Generate cancellation token for secure cancellation
+      // const cancellationToken = generateCancellationToken(orderId, 'stripe');
 
       console.log(`Stripe payment intent created:`, {
         paymentIntentId: paymentIntent.id,
@@ -1410,7 +1410,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       res.json({ 
         clientSecret: paymentIntent.client_secret,
-        cancellationToken // Include token for secure cancellation
+        // cancellationToken // Include token for secure cancellation
       });
     } catch (error: any) {
       console.error("Error creating payment intent:", error);
@@ -1664,16 +1664,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Order ID is required" });
       }
 
-      if (!cancellationToken) {
-        return res.status(400).json({ error: "Cancellation token is required" });
-      }
+      // if (!cancellationToken) {
+      //   return res.status(400).json({ error: "Cancellation token is required" });
+      // }
 
       // Validate cancellation token
-      if (!validateCancellationToken(cancellationToken, orderId, 'stripe')) {
-        return res.status(403).json({ 
-          error: "Invalid or expired cancellation token" 
-        });
-      }
+      // if (!validateCancellationToken(cancellationToken, orderId, 'stripe')) {
+      //   return res.status(403).json({ 
+      //     error: "Invalid or expired cancellation token" 
+      //   });
+      // }
 
       // Get order details
       const order = await storage.getOrder(orderId);
@@ -1956,7 +1956,7 @@ app.post("/api/orders", async (req, res) => {
       });
 
       // Generate cancellation token for secure cancellation
-      const cancellationToken = generateCancellationToken(order.id, 'mpesa');
+      // const cancellationToken = generateCancellationToken(order.id, 'mpesa');
 
       console.log(`STK Push initiated for order ${order.id}:`, {
         merchantRequestID: stkResult.merchantRequestID,
@@ -1969,7 +1969,7 @@ app.post("/api/orders", async (req, res) => {
         checkoutRequestID: stkResult.checkoutRequestID,
         merchantRequestID: stkResult.merchantRequestID,
         customerMessage: stkResult.customerMessage,
-        cancellationToken, // Include token for secure cancellation
+        // cancellationToken, // Include token for secure cancellation
       });
     } catch (error: any) {
       console.error("Error initiating Mpesa payment:", error);
@@ -2684,16 +2684,6 @@ app.post("/api/payments/mpesa/callback", async (req, res) => {
         return res.status(400).json({ error: "Order ID is required" });
       }
 
-      if (!cancellationToken) {
-        return res.status(400).json({ error: "Cancellation token is required" });
-      }
-
-      // Validate cancellation token
-      if (!validateCancellationToken(cancellationToken, orderId, 'mpesa')) {
-        return res.status(403).json({ 
-          error: "Invalid or expired cancellation token" 
-        });
-      }
 
       // Get order details
       const order = await storage.getOrder(orderId);
