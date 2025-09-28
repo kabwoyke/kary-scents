@@ -19,7 +19,6 @@ const shouldUseSSL = isProduction || sslForced;
 // Configure connection pool with environment variables
 const poolConfig: PoolConfig = {
   connectionString: process.env.DATABASE_URL,
-  
   // SSL Configuration for production
   ssl: shouldUseSSL ? {
     rejectUnauthorized: false, // Required for most cloud PostgreSQL providers

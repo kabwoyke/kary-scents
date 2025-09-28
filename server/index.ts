@@ -4,6 +4,8 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { closeDatabase } from "./db";
 
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
