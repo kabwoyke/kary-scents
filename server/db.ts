@@ -22,8 +22,8 @@ const poolConfig: PoolConfig = {
   
   // SSL Configuration for production
   ssl: shouldUseSSL ? {
-    rejectUnauthorized: false, // Required for most cloud PostgreSQL providers
-  } : false,
+    rejectUnauthorized: true, // Required for most cloud PostgreSQL providers
+  } : true,
   
   // Configurable connection pool settings
   max: parseInt(process.env.PGPOOL_MAX || '20', 10), // Maximum number of clients in the pool
