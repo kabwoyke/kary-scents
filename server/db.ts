@@ -2,6 +2,8 @@ import { Pool, PoolConfig } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import * as schema from "@shared/schema";
 import dotenv from "dotenv"
+import fs from 'fs';
+import path from 'path';
 
 dotenv.config()
 
@@ -30,16 +32,41 @@ console.log('shouldUseSSL:', shouldUseSSL);
 // Handle DigitalOcean connection string with SSL parameters
 let connectionString = process.env.DATABASE_URL;
 
+// SSL configuration with CA certificate
+let sslConfig: any = false;
+
+if (shouldUseSSL) {
+  try {
+    // Try to read the CA certificate file
+    // You can place the CA cert in your project root or specify the path
+    const caCertPath ='./ca-certificate.crt';
+    
+    if (fs.existsSync(caCertPath)) {
+      console.log('Using CA certificate for SSL connection');
+      sslConfig = {
+        ca: fs.readFileSync(caCertPath).toString(),
+        rejectUnauthorized: true, // Can be true when using proper CA cert
+      };
+    } else {
+      console.log('CA certificate not found, using rejectUnauthorized: false');
+      sslConfig = {
+        rejectUnauthorized: false, // Fallback for self-signed certs
+      };
+    }
+  } catch (error) {
+    console.warn('Error reading CA certificate, falling back to rejectUnauthorized: false');
+    sslConfig = {
+      rejectUnauthorized: false,
+    };
+  }
+}
+
 // Configure connection pool with environment variables
 const poolConfig: PoolConfig = {
   connectionString: connectionString,
   
-  // SSL Configuration - always enable for DigitalOcean managed databases
-  // Since connection string has sslmode=require, we must configure SSL
-  ssl: {
-    rejectUnauthorized: false, // Required for DigitalOcean managed PostgreSQL
-    sslmode: 'require'
-  },
+  // SSL Configuration with CA certificate support
+  ssl: sslConfig,
   
   // Configurable connection pool settings
   max: parseInt(process.env.PGPOOL_MAX || '20', 10), // Maximum number of clients in the pool
@@ -63,6 +90,7 @@ export const pool = new Pool(poolConfig);
 // Enhanced error handling for the pool
 pool.on('error', (err, client) => {
   console.error('Unexpected error on idle client:', err.message);
+  // @ts-ignore
   console.error('Error code:', err.code);
   console.error('Full error:', err);
   process.exit(-1);
