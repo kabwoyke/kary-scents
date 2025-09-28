@@ -1,13 +1,18 @@
 import express, { type Request, Response, NextFunction } from "express";
 import cookieParser from "cookie-parser";
 import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite";
 import { closeDatabase } from "./db";
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
+
+// Simple log function for production (replace the imported log)
+const log = (message: string) => {
+  const timestamp = new Date().toLocaleTimeString();
+  console.log(`${timestamp} [express] ${message}`);
+};
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -50,20 +55,25 @@ app.use((req, res, next) => {
     throw err;
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
+  // Conditionally import vite modules only when needed
   if (app.get("env") === "development") {
+    // Dynamic import only in development
+    const { setupVite } = await import("./vite");
     await setupVite(app, server);
   } else {
-    serveStatic(app);
+    // For production, either serve static files or skip this entirely
+    // If you have static files to serve, implement a simple static server here
+    // For API-only apps, you can remove this section
+    
+    // Simple static file serving (replace with your needs)
+    app.use(express.static('public')); // if you have a public directory
+    
+    // Or if you don't need static file serving in production, just skip this
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || '5000', 10);
+  // Use PORT from environment, default to 8080 for DigitalOcean compatibility
+  const port = parseInt(process.env.PORT || '8080', 10);
+  
   server.listen({
     port,
     host: "0.0.0.0",
