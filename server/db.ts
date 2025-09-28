@@ -20,17 +20,18 @@ const shouldUseSSL = isProduction || sslForced;
 const poolConfig: PoolConfig = {
   connectionString: process.env.DATABASE_URL,
   
-  // SSL Configuration (corrected for DigitalOcean)
-  ssl: shouldUseSSL
-    ? {
-        rejectUnauthorized: false
-      }
-    : false,
+  // SSL Configuration for production
+  ssl: shouldUseSSL ? {
+    rejectUnauthorized: false, // Required for most cloud PostgreSQL providers
+  } : false,
   
-  max: parseInt(process.env.PGPOOL_MAX || '20', 10),
-  idleTimeoutMillis: parseInt(process.env.PG_IDLE_TIMEOUT || '30000', 10),
-  connectionTimeoutMillis: parseInt(process.env.PG_CONN_TIMEOUT || '5000', 10),
-  allowExitOnIdle: true,
+  // Configurable connection pool settings
+  max: parseInt(process.env.PGPOOL_MAX || '20', 10), // Maximum number of clients in the pool
+  idleTimeoutMillis: parseInt(process.env.PG_IDLE_TIMEOUT || '30000', 10), // Close idle clients after timeout
+  connectionTimeoutMillis: parseInt(process.env.PG_CONN_TIMEOUT || '5000', 10), // Connection timeout
+  
+  // Additional production optimizations
+  allowExitOnIdle: true, // Allow the process to exit when all clients are idle
 };
 
 // Log configuration in development
