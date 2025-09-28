@@ -14,19 +14,19 @@ if (!process.env.DATABASE_URL) {
 // Determine if SSL should be enabled
 const isProduction = process.env.NODE_ENV === 'production';
 const sslForced = process.env.POSTGRES_SSL === 'true';
-const shouldUseSSL = sslForced;
+const shouldUseSSL = isProduction || sslForced;
 
 // Configure connection pool with environment variables
 const poolConfig: PoolConfig = {
   connectionString: process.env.DATABASE_URL,
-
-  // SSL Configuration (only if POSTGRES_SSL=true)
+  
+  // SSL Configuration (corrected for DigitalOcean)
   ssl: shouldUseSSL
     ? {
-        rejectUnauthorized: false, // or provide ca cert if using Managed DB
+        rejectUnauthorized: false
       }
     : false,
-
+  
   max: parseInt(process.env.PGPOOL_MAX || '20', 10),
   idleTimeoutMillis: parseInt(process.env.PG_IDLE_TIMEOUT || '30000', 10),
   connectionTimeoutMillis: parseInt(process.env.PG_CONN_TIMEOUT || '5000', 10),
