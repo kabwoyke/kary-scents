@@ -14,25 +14,23 @@ if (!process.env.DATABASE_URL) {
 // Determine if SSL should be enabled
 const isProduction = process.env.NODE_ENV === 'production';
 const sslForced = process.env.POSTGRES_SSL === 'true';
-const shouldUseSSL = isProduction || sslForced;
+const shouldUseSSL = sslForced;
 
 // Configure connection pool with environment variables
 const poolConfig: PoolConfig = {
   connectionString: process.env.DATABASE_URL,
-  
-  // SSL Configuration for production
-  ssl: shouldUseSSL ? {
-    rejectUnauthorized: false, 
-    // Required for most cloud PostgreSQL providers
-  } : false,
-  
-  // Configurable connection pool settings
-  max: parseInt(process.env.PGPOOL_MAX || '20', 10), // Maximum number of clients in the pool
-  idleTimeoutMillis: parseInt(process.env.PG_IDLE_TIMEOUT || '30000', 10), // Close idle clients after timeout
-  connectionTimeoutMillis: parseInt(process.env.PG_CONN_TIMEOUT || '5000', 10), // Connection timeout
-  
-  // Additional production optimizations
-  allowExitOnIdle: true, // Allow the process to exit when all clients are idle
+
+  // SSL Configuration (only if POSTGRES_SSL=true)
+  ssl: shouldUseSSL
+    ? {
+        rejectUnauthorized: false, // or provide ca cert if using Managed DB
+      }
+    : false,
+
+  max: parseInt(process.env.PGPOOL_MAX || '20', 10),
+  idleTimeoutMillis: parseInt(process.env.PG_IDLE_TIMEOUT || '30000', 10),
+  connectionTimeoutMillis: parseInt(process.env.PG_CONN_TIMEOUT || '5000', 10),
+  allowExitOnIdle: true,
 };
 
 // Log configuration in development
