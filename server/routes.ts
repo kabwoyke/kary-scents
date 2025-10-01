@@ -11,6 +11,8 @@ import multer from "multer";
 import { v2 as cloudinary } from "cloudinary";
 import { db } from "./db";
 import { and, gte, lt, sql } from "drizzle-orm";
+import { fileURLToPath } from "url";
+import path from "path";
 
 // Simple in-memory rate limiting for review submissions
 interface RateLimitEntry {
@@ -383,6 +385,35 @@ async function requireAdminAuth(req: Request, res: Response, next: NextFunction)
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+
+  app.get('/sitemap.xml', (req, res) => {
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    
+    const routes = [
+      { path: '/', priority: '1.0', changefreq: 'daily' },
+      { path: '/shop', priority: '0.9', changefreq: 'daily' },
+      { path: '/cart', priority: '0.7', changefreq: 'always' },
+      { path: '/contact', priority: '0.7', changefreq: 'monthly' },
+    ];
+    
+    let xml = '<?xml version="1.0" encoding="UTF-8"?>';
+    xml += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">';
+    
+    routes.forEach(route => {
+      xml += '<url>';
+      xml += `<loc>${baseUrl}${route.path}</loc>`;
+      xml += `<lastmod>${new Date().toISOString()}</lastmod>`;
+      xml += `<changefreq>${route.changefreq}</changefreq>`;
+      xml += `<priority>${route.priority}</priority>`;
+      xml += '</url>';
+    });
+    
+    xml += '</urlset>';
+    
+    res.header('Content-Type', 'application/xml');
+    res.send(xml);
+  });
+
   // Serve generated images
   app.get("/api/images/generated_images/:filename", (req, res) => {
     const { filename } = req.params;
@@ -2167,6 +2198,7 @@ app.post("/api/payments/mpesa/callback", async (req, res) => {
     return res.status(200).json({ status: "OK" });
   }
 });
+
 
 //   app.post("/api/payments/mpesa/callback", async (req, res) => {
 //   try {
